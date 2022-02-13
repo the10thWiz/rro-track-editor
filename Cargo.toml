@@ -1,0 +1,15 @@
+[package]
+name = "rro-track-editor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = { version = "0.6.0", features = ["dynamic"] }
+bevy_mod_picking = "*"
+bevy_mod_raycast = "*"
+bevy_transform_gizmo = "*"
+smooth-bevy-cameras = "*"
+bspline = "1.1.0"
+encoding_rs = "*"

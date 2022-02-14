@@ -1,30 +1,56 @@
-use std::ops::{Add, Mul, Sub};
+use std::{
+    fs::File,
+    ops::{Add, Mul, Sub}, time::{Instant, Duration},
+};
 
 mod curve;
 mod gvas;
 
-use bevy::{prelude::*, reflect::TypeUuid, render::mesh::Indices, pbr::wireframe::{Wireframe, WireframePlugin}};
+use bevy::{
+    pbr::wireframe::{Wireframe, WireframePlugin},
+    prelude::*,
+    reflect::TypeUuid,
+    render::{
+        mesh::Indices,
+        primitives::{Frustum, Plane},
+    },
+};
 use bevy_mod_picking::{PickingCamera, Selection};
 use bevy_transform_gizmo::{TransformGizmo, TransformGizmoEvent};
 use curve::{mesh_from_curve, BSplineW, Bezier, CubicBezier, PolyBezier};
+use gvas::RROSave;
+use image::ImageFormat;
 use smooth_bevy_cameras::controllers::orbit::{
     OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
 };
 
+use nfd2::Response;
+
 fn main() {
+    let file = nfd2::open_file_dialog(None, None).expect("Failed to open file");
+    let rro = match file {
+        Response::Okay(path) => RROSave::read(&mut File::open(path).expect("Failed to open file")),
+        Response::OkayMultiple(paths) => panic!("{:?}", paths),
+        Response::Cancel => panic!("User Cancelled"),
+    }
+    .expect("Failed to read file");
     App::new()
         .insert_resource(Msaa { samples: 4 })
+        .insert_resource(rro)
+        .insert_resource(BezierIDMax(0))
         .add_plugins(DefaultPlugins)
         .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::default())
         .add_plugin(WireframePlugin)
         .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
-        .add_plugin(bevy_transform_gizmo::TransformGizmoPlugin::new(
-            Quat::from_rotation_y(-0.2), // Align the gizmo to a different coordinate system.
-        )) // Use TransformGizmoPlugin::default() to align to the scene's coordinate system.
+        //.add_plugin(bevy_transform_gizmo::TransformGizmoPlugin::new(
+        //Quat::from_rotation_y(-0.2), // Align the gizmo to a different coordinate system.
+        //)) // Use TransformGizmoPlugin::default() to align to the scene's coordinate system.
         .add_startup_system(setup)
+        .add_startup_system(load_height_map)
         .add_system(transform_events)
         .add_system(update_bezier)
+        .add_system(save)
         .run();
 }
 
@@ -37,10 +63,12 @@ pub struct DragState {
 }
 
 #[derive(Debug, Component)]
-pub struct BezierHandle(usize, pub PolyBezier<CubicBezier>);
+pub struct BezierHandle(usize, pub PolyBezier<CubicBezier>, u32);
 
 #[derive(Debug, Component)]
 pub struct BezierSection(usize, pub Handle<Mesh>);
+
+pub struct BezierIDMax(usize);
 
 pub const STEP: f32 = 0.1;
 pub const ERR: f32 = 0.01;
@@ -86,7 +114,10 @@ fn transform_events(
     }
 
     if mouse_button_input.pressed(MouseButton::Left) && keyboard.just_released(KeyCode::E) {
-        if let Some((s, transform)) = objects.iter().find_map(|(s, _, _)| s.initial.map(|i| (s, i))) {
+        if let Some((s, transform)) = objects
+            .iter()
+            .find_map(|(s, _, _)| s.initial.map(|i| (s, i)))
+        {
             let id = s.id;
             let pt = s.pt;
             for (mut s, _, _) in objects.iter_mut() {
@@ -144,6 +175,35 @@ fn transform_events(
     }
 }
 
+fn save(
+    keyboard: Res<Input<KeyCode>>,
+    beziers: Query<&BezierHandle>,
+    mut save_file: ResMut<RROSave>,
+) {
+    if keyboard.just_pressed(KeyCode::S)
+        && (keyboard.pressed(KeyCode::RControl) || keyboard.pressed(KeyCode::LControl))
+    {
+        save_file.spline_control_points_array.clear();
+        save_file.spline_location_array.clear();
+        save_file.spline_control_points_index_start_array.clear();
+        save_file.spline_control_points_index_end_array.clear();
+        save_file.spline_type_array.clear();
+        for BezierHandle(_id, curve, ty) in beziers.iter() {
+            let pts = curve.get_control_points();
+            save_file.spline_location_array.push([pts[0].z * 100., pts[0].x * 100., pts[0].y * 100.]);
+            let start = save_file.spline_control_points_array.len() as u32;
+            save_file.spline_control_points_index_start_array.push(start);
+            for p in pts {
+                save_file.spline_control_points_array.push([p.z * 100., p.x * 100., p.y * 100.]);
+            }
+            let end = save_file.spline_control_points_array.len() as u32 - 1;
+            save_file.spline_control_points_index_end_array.push(end);
+            save_file.spline_type_array.push(*ty);
+        }
+        todo!("Saving")
+    }
+}
+
 fn update_bezier(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -151,17 +211,29 @@ fn update_bezier(
     mut beziers: Query<&mut BezierHandle>,
     mut sections: Query<(&mut Transform, &BezierSection)>,
 ) {
+    let start = Instant::now();
     for mut b in beziers.iter_mut() {
+        //println!("Spawning bezier");
         for mesh in b.1.create_meshes(meshes.as_mut()) {
             let section = BezierSection(b.0, mesh.clone_weak());
-            commands.spawn_bundle(PbrBundle {
-                mesh,
-                material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-                ..Default::default()
-            }).insert(section).insert(Wireframe);
+            commands
+                .spawn_bundle(PbrBundle {
+                    mesh,
+                    material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                    ..Default::default()
+                })
+                .insert(section);
+                //.insert(Wireframe);
+            //println!("Spawning bezier: {}", b.0);
         }
         b.1.update_transforms(sections.iter_mut().filter(|(_, s)| s.0 == b.0));
+        // Allow partial rendering
+        if start.elapsed() > Duration::from_millis(30) {
+            break;
+        }
+        //println!("Spawning bezier");
     }
+    //println!("Done");
 }
 
 fn spawn_bezier(
@@ -169,27 +241,12 @@ fn spawn_bezier(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     id: usize,
-    pts: [Vec3; 4],
-) {
-    let curve = PolyBezier::new(vec![pts[0], pts[1], pts[2], pts[3]]);
-    //let mesh = mesh_from_curve(curve.walker(STEP, ERR));
-    //let mesh = mesh_from_curve(BSplineW::new(vec![
-    //pts[0], pts[1], pts[2], pts[3],
-    //]).walker(STEP));
-    //let bezier = meshes.add(mesh);
-    //for mesh in curve.create_meshes(meshes) {
-        //let section = BezierSection(id, mesh.clone_weak());
-        //commands.spawn_bundle(PbrBundle {
-            //mesh,
-            //material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-            //..Default::default()
-        //}).insert(section).insert(Wireframe);
-    //}
-    commands.spawn().insert(BezierHandle(id, curve));
+    pts: Vec<Vec3>,
+) -> PolyBezier<CubicBezier> {
     for (i, &pt) in pts.iter().enumerate() {
         commands
             .spawn_bundle(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Cube { size: 0.2 })),
+                mesh: meshes.add(Mesh::from(shape::Cube { size: 3. })),
                 material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
                 transform: Transform::from_translation(pt),
                 ..Default::default()
@@ -201,79 +258,178 @@ fn spawn_bezier(
                 ..DragState::default()
             });
     }
+    PolyBezier::new(pts)
 }
 
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    save_file: Res<RROSave>,
+    mut max_id: ResMut<BezierIDMax>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    //let pos = save_file.spline_location_array.first()
+    //.map(|&[a, b, c]| Vec3::new(a, c, b)).unwrap();
+    //dbg!(pos);
     // plane
-    commands.spawn_bundle(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..Default::default()
-    });
-    //.insert_bundle(bevy_mod_picking::PickableBundle::default())
-    //.insert(bevy_transform_gizmo::GizmoTransformable);
-    //let m = meshes.get_mut(todo!()).unwrap();
-    //// cube
-    //let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleStrip);
-    //mesh.set_attribute(Mesh::ATTRIBUTE_POSITION, vec![
-    //[1., 0.5, 0.],
-    //[1., 0.5, 1.],
-    //[0., 0.5, 1.],
-    //]);
-    //mesh.set_attribute(Mesh::ATTRIBUTE_NORMAL, vec![
-    //[0., 1., 0.],
-    //[0., 1., 0.],
-    //[0., 1., 0.],
-    //]);
-    //mesh.set_attribute(Mesh::ATTRIBUTE_UV_0, vec![
-    //[0., 1.],
-    //[1., 1.],
-    //[1., 0.],
-    //]);
-    //mesh.set_indices(Some(Indices::U32(vec![0, 2, 1])));
-    spawn_bezier(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        0,
-        [
-            Vec3::new(1., 0.5, 1.),
-            Vec3::new(-1., 0.5, 1.),
-            Vec3::new(-1., 0.5, -1.),
-            Vec3::new(1., 0.5, -1.),
-        ],
-    );
+    //commands.spawn_bundle(PbrBundle {
+    //mesh: meshes.add(Mesh::from(shape::Plane { size: 5.0 })),
+    //material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+    //transform: Transform::from_scale(Vec3::new(10., 10., 10.)),
+    //..Default::default()
+    //});
+
+    for i in 0..save_file.spline_type_array.len() {
+        let ty = save_file.spline_type_array[i];
+        let start = save_file.spline_control_points_index_start_array[i] as usize;
+        let end = save_file.spline_control_points_index_end_array[i] as usize;
+        let pts = Vec::from_iter(
+            save_file.spline_control_points_array[start..=end]
+                .iter()
+                .map(|&[a, b, c]| Vec3::new(b / 100., c / 100., a / 100.)),
+        );
+        dbg!(&pts);
+        let curve = spawn_bezier(&mut commands, &mut meshes, &mut materials, i, pts);
+        commands.spawn().insert(BezierHandle(i, curve, ty));
+    }
+    max_id.0 = save_file.spline_type_array.len();
+
     //spawn_bezier(
-        //&mut commands,
-        //&mut meshes,
-        //&mut materials,
-        //1,
-        //[
-            //Vec3::new(1., 0.0, 1.),
-            //Vec3::new(-1., 0.0, 1.),
-            //Vec3::new(-1., 0.0, -1.),
-            //Vec3::new(1., 0.0, -1.),
-        //],
+    //&mut commands,
+    //&mut meshes,
+    //&mut materials,
+    //max_id.0,
+    //vec![
+    //Vec3::new(10., 1., 10.),
+    //Vec3::new(-10., 1., 10.),
+    //Vec3::new(-10., 1., -10.),
+    //Vec3::new(10., 1., -10.),
+    //],
     //);
+    //max_id.0 += 1;
 
     // light
-    commands.spawn_bundle(PointLightBundle {
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
+    //commands.spawn_bundle(PointLightBundle {
+    //transform: Transform::from_xyz(4.0, 40.0, 4.0),
+    //point_light: PointLight {
+    //intensity: 1000.,
+    //range: 10000.,
+    //radius: 10.,
+    //.. Default::default()
+    //},
+    //..Default::default()
+    //});
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 1000.,
+            .. Default::default()
+        },
+        transform: Transform::from_rotation(Quat::from_rotation_x(0.8)),
         ..Default::default()
     });
     // camera
     commands
         .spawn_bundle(OrbitCameraBundle::new(
-            OrbitCameraController::default(),
+            OrbitCameraController {
+                mouse_rotate_sensitivity: Vec2::splat(0.006),
+                mouse_translate_sensitivity: Vec2::splat(0.8),
+                mouse_wheel_zoom_sensitivity: 0.15,
+                smoothing_weight: 0.0,
+                enabled: true,
+                pixels_per_line: 53.0,
+            },
             PerspectiveCameraBundle::default(),
             Vec3::new(-2.0, 5.0, 5.0),
             Vec3::new(0.0, 0.0, 0.0),
         ))
+        //.insert(Transform::from_scale(Vec3::new(10., 10., 10.)))
         .insert_bundle(bevy_mod_picking::PickingCameraBundle::default())
         .insert(bevy_transform_gizmo::GizmoPickSource::default());
+}
+
+fn load_height_map(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    //mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(Mesh::from(shape::Plane { size: 1000. })),
+        material: materials.add(Color::rgb(0.0, 1.0, 0.0).into()),
+        ..Default::default()
+    });
+    return;
+    const HEIGHT_MAP_PNG: &[u8] = include_bytes!("../assets/height_map.png");
+    const NORMAL_MAP_PNG: &[u8] = include_bytes!("../assets/height_map_normals.png");
+    let map = image::load(std::io::Cursor::new(HEIGHT_MAP_PNG), ImageFormat::Png)
+        .unwrap()
+        .into_rgb8();
+    let normal_map = image::load(std::io::Cursor::new(NORMAL_MAP_PNG), ImageFormat::Png)
+        .unwrap()
+        .into_rgb8();
+    let x_off = map.width() as f32 / 2.;
+    let y_off = map.height() as f32 / 2.;
+
+    let mut points = vec![];
+    let normals: Vec<_> = normal_map.pixels().map(|p| [p.0[0] as f32 / 255., p.0[1] as f32 / 255., p.0[2] as f32 / 255.]).collect();
+    let mut uv = vec![];
+    for (x, y, p) in map.enumerate_pixels() {
+        let h = match (p.0[0], p.0[1], p.0[2]) {
+            (94, 79, 162) => 5.,
+            (78, 98, 171) => 6.,
+            (63, 118, 180) => 7.,
+            (52, 138, 188) => 8.,
+            (70, 158, 179) => 9.,
+            (88, 178, 171) => 10.,
+            (107, 196, 164) => 11.,
+            (131, 205, 164) => 12.,
+            (155, 214, 164) => 13.,
+            (177, 223, 162) => 14.,
+            (198, 232, 158) => 15.,
+            (218, 240, 154) => 16.,
+            (233, 241, 150) => 17.,
+            (242, 234, 145) => 18.,
+            (250, 227, 140) => 19.,
+            (253, 214, 130) => 20.,
+            (253, 197, 116) => 21.,
+            (253, 179, 101) => 22.,
+            (250, 158, 90) => 23.,
+            (247, 136, 79) => 24.,
+            (244, 113, 69) => 25.,
+            _ => 0.,
+        };
+        points.push([x as f32 - x_off, h, y as f32 - y_off]);
+        uv.push([x as f32, y as f32]);
+    }
+
+    let mut indicies = vec![];
+    for y in 1..map.height() {
+        for x in 1..map.width() {
+            let idx = y * map.width() + x;
+            indicies.extend([
+                idx - 1 - map.width(),
+                idx,
+                idx - map.width(),
+                idx - 1,
+                idx,
+                idx - 1 - map.width(),
+            ]);
+        }
+    }
+
+    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
+    mesh.set_attribute(Mesh::ATTRIBUTE_POSITION, points);
+    mesh.set_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.set_attribute(Mesh::ATTRIBUTE_UV_0, uv);
+    mesh.set_indices(Some(Indices::U32(indicies)));
+    //mesh.duplicate_vertices();
+    //mesh.compute_flat_normals();
+
+    commands.spawn_bundle(PbrBundle {
+        mesh: meshes.add(mesh),
+        material: materials.add(Color::rgb(0.0, 1.0, 0.0).into()),
+        ..Default::default()
+    });
+    //.insert(Wireframe);
 }

@@ -31,7 +31,11 @@ fn bisect_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 
 // Offsets is a 2D shape to use as a cross section of the generated mesh. `y` is vertical according
 // to the curve.
-pub fn gen_mesh_from_curve<const N: usize>(loc: Vec3, curve: impl Iterator<Item = CurvePoint>, offsets: [Vec2; N]) -> Mesh {
+pub fn gen_mesh_from_curve<const N: usize>(
+    loc: Vec3,
+    curve: impl Iterator<Item = CurvePoint>,
+    offsets: [Vec2; N],
+) -> Mesh {
     let mut points = vec![];
     let mut normals = vec![];
     let mut uv = vec![];
@@ -48,7 +52,7 @@ pub fn gen_mesh_from_curve<const N: usize>(loc: Vec3, curve: impl Iterator<Item 
         if pt.tangent.cross(pt.normal).y > 0. {
             //panic!("{}", pt.tangent.cross(pt.normal));
         }
-        let mut pts = [ Vec3::ZERO; N ];
+        let mut pts = [Vec3::ZERO; N];
         for (i, offset) in offsets.iter().enumerate() {
             pts[i] = pt.point + pt.normal * offset.x + pt.up * offset.y;
         }
@@ -94,12 +98,16 @@ pub fn gen_mesh_from_curve<const N: usize>(loc: Vec3, curve: impl Iterator<Item 
 }
 
 pub fn mesh_from_curve(loc: Vec3, curve: impl Iterator<Item = CurvePoint>) -> Mesh {
-    gen_mesh_from_curve(loc, curve, [
-        Vec2::new(-1., -1.),
-        Vec2::new(1., -1.),
-        Vec2::new(1., 1.),
-        Vec2::new(-1., 1.),
-    ])
+    gen_mesh_from_curve(
+        loc,
+        curve,
+        [
+            Vec2::new(-1., -1.),
+            Vec2::new(1., -1.),
+            Vec2::new(1., 1.),
+            Vec2::new(-1., 1.),
+        ],
+    )
 }
 
 pub trait Bezier: Clone {
@@ -351,8 +359,7 @@ impl MeshUpdate {
     pub fn has(&self, h: &Handle<Mesh>) -> bool {
         match self {
             Self::Insert => false,
-            Self::None(m)|
-            Self::Modified(m) => m.id == h.id,
+            Self::None(m) | Self::Modified(m) => m.id == h.id,
         }
     }
 }
@@ -380,12 +387,7 @@ impl PolyBezier<CubicBezier> {
         assert!(points.len() > 1);
         if points.len() == 2 {
             Self {
-                parts: vec![CubicBezier::new(
-                    points[0],
-                    Vec3::ZERO,
-                    Vec3::ZERO,
-                    points[1],
-                )],
+                parts: vec![CubicBezier::new(points[0], points[0], points[1], points[1])],
                 derivative: None,
                 updates: vec![MeshUpdate::Insert],
             }
@@ -418,11 +420,15 @@ impl PolyBezier<CubicBezier> {
         if pt == 0 {
             self.parts[0].pts[0] = loc;
             self.updates[0].modified();
-            self.updates[1].modified();
+            if self.updates.len() > 1 {
+                self.updates[1].modified();
+            }
         } else if pt == self.parts.len() {
             self.parts[pt - 1].pts[3] = loc;
             self.updates[pt - 1].modified();
-            self.updates[pt - 2].modified();
+            if self.updates.len() > 1 {
+                self.updates[pt - 2].modified();
+            }
         } else {
             self.parts[pt - 1].pts[3] = loc;
             self.parts[pt].pts[0] = loc;
@@ -465,6 +471,8 @@ impl PolyBezier<CubicBezier> {
 
     pub fn create_meshes(&mut self, assets: &mut Assets<Mesh>) -> Vec<Handle<Mesh>> {
         //self.compute_derivatives();
+        const STEP: f32 = 1.0;
+        const ERR: f32 = 0.5;
         let mut ret = vec![];
         for (i, flag) in self.updates.iter_mut().enumerate() {
             if let Some(handle) = flag.set(assets, || {
@@ -472,8 +480,8 @@ impl PolyBezier<CubicBezier> {
                     curve: &self.parts[i],
                     derivative: Cow::Owned(self.parts[i].derivative()),
                     t: 0.,
-                    step_sq: 0.1 * 0.1,
-                    err_sq: 0.01 * 0.01,
+                    step_sq: STEP * STEP,
+                    err_sq: ERR * ERR,
                     end: 1.,
                 };
                 mesh_from_curve(self.parts[i].centroid(), walker)
@@ -503,12 +511,23 @@ impl PolyBezier<CubicBezier> {
         self.compute_tweens();
     }
 
-    pub fn update_transforms<'a>(&self, q: impl Iterator<Item = (Mut<'a, Transform>, &'a BezierSection)>) {
+    pub fn update_transforms<'a>(
+        &self,
+        q: impl Iterator<Item = (Mut<'a, Transform>, &'a BezierSection)>,
+    ) {
         for (mut t, s) in q {
             if let Some(i) = self.updates.iter().position(|u| u.has(&s.1)) {
                 t.translation = self.parts[i].centroid();
             }
         }
+    }
+
+    pub fn get_control_points(&self) -> Vec<Vec3> {
+        let mut ret = vec![self.parts[0].pts[0]];
+        for p in self.parts.iter() {
+            ret.push(p.pts[3]);
+        }
+        ret
     }
 }
 
@@ -533,7 +552,8 @@ impl<C: Bezier> Bezier for PolyBezier<C> {
     fn derivative(&self) -> Self::Derivative {
         PolyBezier {
             parts: self
-                .derivative.clone()
+                .derivative
+                .clone()
                 .unwrap_or_else(|| self.parts.iter().map(|b| b.derivative()).collect()),
             derivative: None,
             updates: vec![MeshUpdate::Insert; self.updates.len()],

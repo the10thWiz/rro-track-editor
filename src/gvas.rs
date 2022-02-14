@@ -428,7 +428,7 @@ impl Value {
                             ret,
                         ))
                     }
-                    _ => todo!(),
+                    _ => Err(Error::new(ErrorKind::InvalidData, ty)),
                 }
             }
             "IntProperty" => {
@@ -451,7 +451,7 @@ impl Value {
                 //println!("{:X?}", raw.bytes().collect::<Result<Vec<_>>>()?);
                 Ok(Self::Array(ty.to_string(), raw_len, None, ret))
             }
-            _ => todo!(),
+            _ => Err(Error::new(ErrorKind::InvalidData, ty)),
         }
     }
 
@@ -569,7 +569,7 @@ impl RROSave {
         let mut idx_spline_visibility_start_array = 0;
         let mut idx_spline_visibility_end_array = 0;
         for (i, prop) in inner.properties.iter_mut().enumerate() {
-            prop.val.translate().unwrap();
+            let _ = prop.val.translate();
             if let Value::Array(_, _, _, v) = &prop.val {
                 match prop.name.as_str() {
                     "SplineLocationArray" => {

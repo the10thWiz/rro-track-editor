@@ -1,8 +1,10 @@
 use std::{
     fs::File,
-    ops::{Add, Mul, Sub}, time::{Instant, Duration},
+    ops::{Add, Mul, Sub},
+    time::{Duration, Instant}, path::PathBuf,
 };
 
+mod button;
 mod curve;
 mod gvas;
 
@@ -15,8 +17,10 @@ use bevy::{
         primitives::{Frustum, Plane},
     },
 };
-use bevy_mod_picking::{PickingCamera, Selection};
+use bevy_egui::EguiPlugin;
+use bevy_mod_picking::{Hover, PickingCamera, Selection};
 use bevy_transform_gizmo::{TransformGizmo, TransformGizmoEvent};
+use button::{MouseAction, MouseOptions};
 use curve::{mesh_from_curve, BSplineW, Bezier, CubicBezier, PolyBezier};
 use gvas::RROSave;
 use image::ImageFormat;
@@ -27,30 +31,38 @@ use smooth_bevy_cameras::controllers::orbit::{
 use nfd2::Response;
 
 fn main() {
-    let file = nfd2::open_file_dialog(None, None).expect("Failed to open file");
-    let rro = match file {
-        Response::Okay(path) => RROSave::read(&mut File::open(path).expect("Failed to open file")),
+    //let file = nfd2::open_file_dialog(None, None).expect("Failed to open file");
+    let file = Response::Okay("slot10 - Copy.sav".into());
+    let (rro, path) = match file {
+        Response::Okay(path) => (
+            RROSave::read(&mut File::open(&path).expect("Failed to open file"))
+                .expect("Failed to read file"),
+            path,
+        ),
         Response::OkayMultiple(paths) => panic!("{:?}", paths),
         Response::Cancel => panic!("User Cancelled"),
-    }
-    .expect("Failed to read file");
+    };
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(rro)
+        .insert_resource(path)
         .insert_resource(BezierIDMax(0))
         .add_plugins(DefaultPlugins)
         .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::default())
         .add_plugin(WireframePlugin)
+        .add_plugin(EguiPlugin)
         .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
         //.add_plugin(bevy_transform_gizmo::TransformGizmoPlugin::new(
         //Quat::from_rotation_y(-0.2), // Align the gizmo to a different coordinate system.
         //)) // Use TransformGizmoPlugin::default() to align to the scene's coordinate system.
+        .add_startup_system(button::button_setup)
         .add_startup_system(setup)
         .add_startup_system(load_height_map)
         .add_system(transform_events)
         .add_system(update_bezier)
         .add_system(save)
+        .add_system(button::button_system)
         .run();
 }
 
@@ -80,8 +92,9 @@ fn transform_events(
     keyboard: Res<Input<KeyCode>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut objects: Query<(&mut DragState, &Selection, &mut Transform)>,
+    mut objects: Query<(&mut DragState, &Hover, &mut Transform)>,
     mut beziers: Query<&mut BezierHandle>,
+    mouse_opts: Res<MouseOptions>,
 ) {
     let picking_camera: &PickingCamera = if let Some(cam) = pick_cam.iter().last() {
         cam
@@ -97,58 +110,63 @@ fn transform_events(
     };
     if mouse_button_input.just_pressed(MouseButton::Left) {
         for (mut state, sel, mut trans) in objects.iter_mut() {
-            let (state, sel, trans): (&mut DragState, &Selection, &mut Transform) =
+            let (state, sel, trans): (&mut DragState, &Hover, &mut Transform) =
                 (state.as_mut(), sel, trans.as_mut());
-            if sel.selected() {
+            if sel.hovered() {
                 state.initial = Some(trans.clone());
                 state.drag_start = Some((trans.translation, picking_ray.direction()));
             }
         }
+        if mouse_opts.action == MouseAction::Extrude {
+            if let Some((s, transform)) = objects
+                .iter()
+                .find_map(|(s, _, _)| s.initial.map(|i| (s, i)))
+            {
+                let id = s.id;
+                let pt = s.pt;
+                for (mut s, _, _) in objects.iter_mut() {
+                    if s.id == id && s.pt > pt {
+                        s.pt += 1;
+                    }
+                }
+                for mut handle in beziers.iter_mut() {
+                    if handle.0 == id {
+                        handle.1.insert(pt, transform.translation);
+                    }
+                }
+                commands
+                    .spawn_bundle(PbrBundle {
+                        mesh: meshes.add(Mesh::from(shape::Cube { size: 3. })),
+                        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+                        transform,
+                        ..Default::default()
+                    })
+                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert(DragState {
+                        id,
+                        pt: pt + 1,
+                        ..DragState::default()
+                    });
+            }
+        }
     } else if mouse_button_input.just_released(MouseButton::Left) {
         for (mut state, sel, mut trans) in objects.iter_mut() {
-            let (state, sel, trans): (&mut DragState, &Selection, &mut Transform) =
+            let (state, sel, trans): (&mut DragState, &Hover, &mut Transform) =
                 (state.as_mut(), sel, trans.as_mut());
             state.initial = None;
             state.drag_start = None;
         }
     }
 
-    if mouse_button_input.pressed(MouseButton::Left) && keyboard.just_released(KeyCode::E) {
-        if let Some((s, transform)) = objects
-            .iter()
-            .find_map(|(s, _, _)| s.initial.map(|i| (s, i)))
-        {
-            let id = s.id;
-            let pt = s.pt;
-            for (mut s, _, _) in objects.iter_mut() {
-                if s.id == id && s.pt > pt {
-                    s.pt += 1;
-                }
-            }
-            for mut handle in beziers.iter_mut() {
-                if handle.0 == id {
-                    handle.1.insert(pt, transform.translation);
-                }
-            }
-            commands
-                .spawn_bundle(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Cube { size: 0.2 })),
-                    material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-                    transform,
-                    ..Default::default()
-                })
-                .insert_bundle(bevy_mod_picking::PickableBundle::default())
-                .insert(DragState {
-                    id,
-                    pt: pt + 1,
-                    ..DragState::default()
-                });
-        }
-    }
     for (mut state, sel, mut trans) in objects.iter_mut() {
-        let (state, sel, trans): (&mut DragState, &Selection, &mut Transform) =
+        let (state, sel, trans): (&mut DragState, &Hover, &mut Transform) =
             (state.as_mut(), sel, trans.as_mut());
         if let Some((origin, dir)) = state.drag_start {
+            let dir = if mouse_opts.lock_z {
+                Vec3::new(0., 1., 0.)
+            } else {
+                dir
+            };
             if let Some(int) =
                 picking_camera.intersect_primitive(bevy_mod_picking::Primitive3d::Plane {
                     point: origin,
@@ -179,6 +197,7 @@ fn save(
     keyboard: Res<Input<KeyCode>>,
     beziers: Query<&BezierHandle>,
     mut save_file: ResMut<RROSave>,
+    save_path: Res<PathBuf>,
 ) {
     if keyboard.just_pressed(KeyCode::S)
         && (keyboard.pressed(KeyCode::RControl) || keyboard.pressed(KeyCode::LControl))
@@ -188,19 +207,34 @@ fn save(
         save_file.spline_control_points_index_start_array.clear();
         save_file.spline_control_points_index_end_array.clear();
         save_file.spline_type_array.clear();
+        save_file.spline_visibility_start_array.clear();
+        save_file.spline_visibility_end_array.clear();
+        save_file.spline_segments_visibility_array.clear();
         for BezierHandle(_id, curve, ty) in beziers.iter() {
             let pts = curve.get_control_points();
-            save_file.spline_location_array.push([pts[0].z * 100., pts[0].x * 100., pts[0].y * 100.]);
+            save_file.spline_location_array.push([
+                pts[0].z * 100.,
+                pts[0].x * 100.,
+                pts[0].y * 100.,
+            ]);
             let start = save_file.spline_control_points_array.len() as u32;
-            save_file.spline_control_points_index_start_array.push(start);
+            save_file
+                .spline_control_points_index_start_array
+                .push(start);
+            save_file.spline_visibility_start_array.push(start);
             for p in pts {
-                save_file.spline_control_points_array.push([p.z * 100., p.x * 100., p.y * 100.]);
+                save_file
+                    .spline_control_points_array
+                    .push([p.z * 100., p.x * 100., p.y * 100.]);
+                save_file.spline_segments_visibility_array.push(true);
             }
             let end = save_file.spline_control_points_array.len() as u32 - 1;
             save_file.spline_control_points_index_end_array.push(end);
+            save_file.spline_visibility_end_array.push(end);
             save_file.spline_type_array.push(*ty);
         }
-        todo!("Saving")
+        save_file.clone().write(&mut File::create(save_path.as_path()).unwrap()).unwrap();
+        //todo!("Saving")
     }
 }
 
@@ -223,7 +257,7 @@ fn update_bezier(
                     ..Default::default()
                 })
                 .insert(section);
-                //.insert(Wireframe);
+            //.insert(Wireframe);
             //println!("Spawning bezier: {}", b.0);
         }
         b.1.update_transforms(sections.iter_mut().filter(|(_, s)| s.0 == b.0));
@@ -323,7 +357,7 @@ fn setup(
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 1000.,
-            .. Default::default()
+            ..Default::default()
         },
         transform: Transform::from_rotation(Quat::from_rotation_x(0.8)),
         ..Default::default()
@@ -372,7 +406,16 @@ fn load_height_map(
     let y_off = map.height() as f32 / 2.;
 
     let mut points = vec![];
-    let normals: Vec<_> = normal_map.pixels().map(|p| [p.0[0] as f32 / 255., p.0[1] as f32 / 255., p.0[2] as f32 / 255.]).collect();
+    let normals: Vec<_> = normal_map
+        .pixels()
+        .map(|p| {
+            [
+                p.0[0] as f32 / 255.,
+                p.0[1] as f32 / 255.,
+                p.0[2] as f32 / 255.,
+            ]
+        })
+        .collect();
     let mut uv = vec![];
     for (x, y, p) in map.enumerate_pixels() {
         let h = match (p.0[0], p.0[1], p.0[2]) {

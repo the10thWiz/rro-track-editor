@@ -526,6 +526,7 @@ impl Value {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct RROSave {
     inner: GVASFile,
     pub spline_location_array: Vec<[f32; 3]>,

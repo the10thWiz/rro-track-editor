@@ -22,26 +22,35 @@ use bevy_mod_picking::{Hover, PickingCamera, Selection};
 use bevy_transform_gizmo::{TransformGizmo, TransformGizmoEvent};
 use button::{MouseAction, MouseOptions};
 use curve::{mesh_from_curve, BSplineW, Bezier, CubicBezier, PolyBezier};
-use gvas::RROSave;
+use gvas::{RROSave, SplineType};
 use image::ImageFormat;
 use smooth_bevy_cameras::controllers::orbit::{
     OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
 };
 
-use nfd2::Response;
+// use nfd2::Response;
 
 fn main() {
-    //let file = nfd2::open_file_dialog(None, None).expect("Failed to open file");
-    let file = Response::Okay("slot10 - Copy.sav".into());
-    let (rro, path) = match file {
-        Response::Okay(path) => (
-            RROSave::read(&mut File::open(&path).expect("Failed to open file"))
-                .expect("Failed to read file"),
-            path,
-        ),
-        Response::OkayMultiple(paths) => panic!("{:?}", paths),
-        Response::Cancel => panic!("User Cancelled"),
-    };
+    // let file = nfd2::open_file_dialog(None, None).expect("Failed to open file");
+    // let (rro, path) = match file {
+    //     Response::Okay(path) => (
+    //         RROSave::read(&mut File::open(&path).expect("Failed to open file"))
+    //             .expect("Failed to read file"),
+    //         path,
+    //     ),
+    //     Response::OkayMultiple(paths) => panic!("{:?}", paths),
+    //     Response::Cancel => panic!("User Cancelled"),
+    // };
+    // println!("{:?}", std::env::current_dir().unwrap().read_dir().unwrap().collect::<Vec<_>>());
+    println!("Started");
+    let path: PathBuf = ["c:\\", "Users", "PomesMatthew", "Documents", "rro-track-editor", "slot10.sav"].iter().collect();
+    // let path: PathBuf = PathBuf::new();
+    println!("Created path");
+    println!("Path: {}, {}", path.display(), path.exists());
+    // 
+    let rro = RROSave::read(&mut File::open(&path).expect("Failed to open file"))
+                .expect("Failed to read file");
+    println!("read file");
     App::new()
         .insert_resource(Msaa { samples: 4 })
         .insert_resource(rro)
@@ -62,6 +71,7 @@ fn main() {
         .add_system(transform_events)
         .add_system(update_bezier)
         .add_system(save)
+        .add_system(debugging)
         .add_system(button::button_system)
         .run();
 }
@@ -75,7 +85,7 @@ pub struct DragState {
 }
 
 #[derive(Debug, Component)]
-pub struct BezierHandle(usize, pub PolyBezier<CubicBezier>, u32);
+pub struct BezierHandle(usize, pub PolyBezier<CubicBezier>, SplineType);
 
 #[derive(Debug, Component)]
 pub struct BezierSection(usize, pub Handle<Mesh>);
@@ -199,42 +209,50 @@ fn save(
     mut save_file: ResMut<RROSave>,
     save_path: Res<PathBuf>,
 ) {
+    use gvas::CurveDataOwned;
     if keyboard.just_pressed(KeyCode::S)
         && (keyboard.pressed(KeyCode::RControl) || keyboard.pressed(KeyCode::LControl))
     {
-        save_file.spline_control_points_array.clear();
-        save_file.spline_location_array.clear();
-        save_file.spline_control_points_index_start_array.clear();
-        save_file.spline_control_points_index_end_array.clear();
-        save_file.spline_type_array.clear();
-        save_file.spline_visibility_start_array.clear();
-        save_file.spline_visibility_end_array.clear();
-        save_file.spline_segments_visibility_array.clear();
-        for BezierHandle(_id, curve, ty) in beziers.iter() {
-            let pts = curve.get_control_points();
-            save_file.spline_location_array.push([
-                pts[0].z * 100.,
-                pts[0].x * 100.,
-                pts[0].y * 100.,
-            ]);
-            let start = save_file.spline_control_points_array.len() as u32;
-            save_file
-                .spline_control_points_index_start_array
-                .push(start);
-            save_file.spline_visibility_start_array.push(start);
-            for p in pts {
-                save_file
-                    .spline_control_points_array
-                    .push([p.z * 100., p.x * 100., p.y * 100.]);
-                save_file.spline_segments_visibility_array.push(true);
+        println!("Saving file to {}", save_path.display());
+        save_file.set_curves(beziers.iter().map(|BezierHandle(_id, curve, ty)| {
+            let pts: Vec<_> = curve.get_control_points().into_iter().map(|v| [v.z * 100., v.x * 100., v.y * 100.]).collect();
+            CurveDataOwned {
+                location: pts[0],
+                ty: *ty,
+                visibility: vec![true; pts.len() - 1],
+                control_points: pts,
             }
-            let end = save_file.spline_control_points_array.len() as u32 - 1;
-            save_file.spline_control_points_index_end_array.push(end);
-            save_file.spline_visibility_end_array.push(end);
-            save_file.spline_type_array.push(*ty);
+        })).expect("Failed to update file");
+        save_file.write(&mut File::create(save_path.as_path()).unwrap()).unwrap();
+    }
+}
+
+fn debugging(
+    keyboard: Res<Input<KeyCode>>,
+    beziers: Query<&BezierHandle>,
+    control_points: Query<(&DragState, &Hover)>,
+    curve_segments: Query<(&BezierSection, &Hover)>,
+) {
+    if keyboard.just_pressed(KeyCode::D) {
+        let mut id = None;
+        for (dr, hover) in control_points.iter() {
+            if hover.hovered() {
+                id = Some(dr.id);
+            }
         }
-        save_file.clone().write(&mut File::create(save_path.as_path()).unwrap()).unwrap();
-        //todo!("Saving")
+        for (dr, hover) in curve_segments.iter() {
+            if hover.hovered() {
+                id = Some(dr.0);
+            }
+        }
+        if let Some(id) = id {
+            for BezierHandle(_id, curve, ty) in beziers.iter() {
+                if *_id == id {
+                    println!("Curve: {:?}", curve);
+                    println!("\ttype: {:?}", ty);
+                }
+            }
+        }
     }
 }
 
@@ -256,6 +274,7 @@ fn update_bezier(
                     material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
                     ..Default::default()
                 })
+                .insert_bundle(bevy_mod_picking::PickableBundle::default())
                 .insert(section);
             //.insert(Wireframe);
             //println!("Spawning bezier: {}", b.0);
@@ -314,20 +333,25 @@ fn setup(
     //..Default::default()
     //});
 
-    for i in 0..save_file.spline_type_array.len() {
-        let ty = save_file.spline_type_array[i];
-        let start = save_file.spline_control_points_index_start_array[i] as usize;
-        let end = save_file.spline_control_points_index_end_array[i] as usize;
-        let pts = Vec::from_iter(
-            save_file.spline_control_points_array[start..=end]
-                .iter()
-                .map(|&[a, b, c]| Vec3::new(b / 100., c / 100., a / 100.)),
-        );
-        dbg!(&pts);
-        let curve = spawn_bezier(&mut commands, &mut meshes, &mut materials, i, pts);
-        commands.spawn().insert(BezierHandle(i, curve, ty));
+    // for i in 0..save_file.spline_type_array.len() {
+    //     let ty = save_file.spline_type_array[i];
+    //     let start = save_file.spline_control_points_index_start_array[i] as usize;
+    //     let end = save_file.spline_control_points_index_end_array[i] as usize;
+    //     let pts = Vec::from_iter(
+    //         save_file.spline_control_points_array[start..=end]
+    //             .iter()
+    //             .map(|&[a, b, c]| Vec3::new(b / 100., c / 100., a / 100.)),
+    //     );
+    //     dbg!(&pts);
+    //     let curve = spawn_bezier(&mut commands, &mut meshes, &mut materials, i, pts);
+    //     commands.spawn().insert(BezierHandle(i, curve, ty));
+    // }
+    for (i, curve) in save_file.curves().expect("Save File Format").enumerate() {
+        let pts: Vec<_> = curve.control_points.iter().map(|&[a, b, c]| Vec3::new(b / 100., c / 100., a / 100.)).collect();
+        let bezier = spawn_bezier(&mut commands, &mut meshes, &mut materials, i, pts);
+        commands.spawn().insert(BezierHandle(i, bezier, curve.ty));
+        max_id.0 += 1;
     }
-    max_id.0 = save_file.spline_type_array.len();
 
     //spawn_bezier(
     //&mut commands,

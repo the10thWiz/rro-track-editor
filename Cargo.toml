@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.6.0", features = ["dynamic"] }
+bevy = { version = "0.6" }
 bevy_mod_picking = "*"
 bevy_mod_raycast = "*"
 bevy_transform_gizmo = "*"
@@ -14,5 +14,9 @@ smooth-bevy-cameras = "*"
 bevy_egui = "0.11"
 bspline = "1.1.0"
 encoding_rs = "*"
-nfd2 = "0.3.1"
+#nfd2 = "*"
 image = "*"
+enum-utils = "0.1.2"
+
+[patch.crates-io]
+bevy = { git = 'https://github.com/bevyengine/bevy', branch = "main" }

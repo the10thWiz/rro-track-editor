@@ -102,10 +102,10 @@ pub fn mesh_from_curve(loc: Vec3, curve: impl Iterator<Item = CurvePoint>) -> Me
         loc,
         curve,
         [
-            Vec2::new(-1., -1.),
-            Vec2::new(1., -1.),
-            Vec2::new(1., 1.),
-            Vec2::new(-1., 1.),
+            Vec2::new(-0.1, -0.1),
+            Vec2::new(0.1, -0.1),
+            Vec2::new(0.1, 0.1),
+            Vec2::new(-0.1, 0.1),
         ],
     )
 }
@@ -471,8 +471,8 @@ impl PolyBezier<CubicBezier> {
 
     pub fn create_meshes(&mut self, assets: &mut Assets<Mesh>) -> Vec<Handle<Mesh>> {
         //self.compute_derivatives();
-        const STEP: f32 = 1.0;
-        const ERR: f32 = 0.5;
+        const STEP: f32 = 0.1;
+        const ERR: f32 = 0.05;
         let mut ret = vec![];
         for (i, flag) in self.updates.iter_mut().enumerate() {
             if let Some(handle) = flag.set(assets, || {

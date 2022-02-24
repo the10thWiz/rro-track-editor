@@ -705,8 +705,6 @@ dependencies = [
 [[package]]
 name = "bevy_transform_gizmo"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17f6098c2938933f6ac510857e2df0e45e0dc66339ae078a8255a6ea96ae9f9"
 dependencies = [
  "bevy",
  "bevy_mod_picking",
@@ -2373,6 +2371,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "obj-rs"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c90a2f645433dba5c609451d3fa847282b0f23ee8d8fa75491a946af53cb1db4"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2745,6 +2752,7 @@ dependencies = [
 name = "rro-track-editor"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bevy",
  "bevy_egui",
  "bevy_mod_picking",
@@ -2754,7 +2762,9 @@ dependencies = [
  "encoding_rs",
  "enum-utils",
  "image",
+ "obj-rs",
  "smooth-bevy-cameras",
+ "thiserror",
 ]
 
 [[package]]

@@ -7,6 +7,8 @@ use std::{
 mod button;
 mod curve;
 mod gvas;
+mod spline_mesh;
+use spline_mesh::curve_offset;
 
 use bevy::{
     pbr::wireframe::{Wireframe, WireframePlugin},
@@ -17,11 +19,9 @@ use bevy::{
         primitives::{Frustum, Plane},
     },
 };
-use bevy_egui::EguiPlugin;
 use bevy_mod_picking::{Hover, PickingCamera, Selection};
-use bevy_transform_gizmo::{TransformGizmo, TransformGizmoEvent};
 use button::{MouseAction, MouseOptions};
-use curve::{mesh_from_curve, BSplineW, Bezier, CubicBezier, PolyBezier};
+use curve::{BSplineW, Bezier, CubicBezier, PolyBezier};
 use gvas::{RROSave, SplineType};
 use image::ImageFormat;
 use smooth_bevy_cameras::controllers::orbit::{
@@ -46,8 +46,17 @@ fn main() {
     // };
     // println!("{:?}", std::env::current_dir().unwrap().read_dir().unwrap().collect::<Vec<_>>());
     println!("Started");
-    // let path: PathBuf = ["c:\\", "Users", "PomesMatthew", "Documents", "rro-track-editor", "slot10.sav"].iter().collect();
-    let path: PathBuf = ["c:\\", "Users", "PomesMatthew", "AppData", "Local", "arr", "Saved", "SaveGames", "slot10.sav"].iter().collect();
+    let path: PathBuf = [
+        "c:\\",
+        "Users",
+        "PomesMatthew",
+        "AppData",
+        "Local",
+        "arr",
+        "Saved",
+        "SaveGames",
+        "slot10.sav"
+    ].iter().collect();
     // let path: PathBuf = PathBuf::new();
     println!("Created path");
     println!("Path: {}, {}", path.display(), path.exists());
@@ -65,9 +74,7 @@ fn main() {
         .add_plugin(OrbitCameraPlugin::default())
         .add_plugin(WireframePlugin)
         .add_plugin(ObjPlugin)// Temp workaround to get bevy_obj to work
-        .add_plugin(EguiPlugin)
         .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
-        .add_plugin(bevy_transform_gizmo::TransformGizmoPlugin::default()) // Use TransformGizmoPlugin::default() to align to the scene's coordinate system.
         .add_startup_system(setup)
         .add_startup_system(button::button_setup)
         .add_startup_system(load_height_map)
@@ -198,8 +205,8 @@ fn transform_events(
                 }
                 *trans = init;
                 if let Some(mut b) = beziers.iter_mut().find(|b| b.0 == state.id) {
-                    //b.1.translate(state.pt, init.translation);
-                    b.1.update(state.pt, init.translation);
+                    let off = curve_offset(b.2);
+                    b.1.update(state.pt, init.translation + off);
                 }
             }
         }
@@ -218,7 +225,11 @@ fn save(
     {
         println!("Saving file to {}", save_path.display());
         save_file.set_curves(beziers.iter().map(|BezierHandle(_id, curve, ty)| {
-            let pts: Vec<_> = curve.get_control_points().into_iter().map(|v| [v.z * 1000., v.x * 1000., v.y * 1000.]).collect();
+            let pts: Vec<_> = curve
+                .get_control_points()
+                .into_iter()
+                .map(|v| [v.z * 1000., v.x * 1000., v.y * 1000.])
+                .collect();
             CurveDataOwned {
                 location: pts[0],
                 ty: *ty,
@@ -278,7 +289,7 @@ fn update_bezier(
             commands
                 .spawn_bundle(PbrBundle {
                     mesh,
-                    material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                    material: materials.add(spline_mesh::curve_color(b.2).into()),
                     ..Default::default()
                 })
                 .insert_bundle(bevy_mod_picking::PickableBundle::default())
@@ -302,13 +313,14 @@ fn spawn_bezier(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     id: usize,
     pts: Vec<Vec3>,
+    ty: SplineType,
 ) -> PolyBezier<CubicBezier> {
     for (i, &pt) in pts.iter().enumerate() {
         commands
             .spawn_bundle(PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Cube { size: 0.3 })),
                 material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-                transform: Transform::from_translation(pt),
+                transform: Transform::from_translation(pt + curve_offset(ty)),
                 ..Default::default()
             })
             .insert_bundle(bevy_mod_picking::PickableBundle::default())
@@ -318,7 +330,7 @@ fn spawn_bezier(
                 ..DragState::default()
             });
     }
-    PolyBezier::new(pts)
+    PolyBezier::new(pts, ty)
 }
 
 /// set up a simple 3D scene
@@ -331,8 +343,12 @@ fn setup(
 ) {
    
     for (i, curve) in save_file.curves().expect("Save File Format").enumerate() {
-        let pts: Vec<_> = curve.control_points.iter().map(|&[a, b, c]| Vec3::new(b / 1000., c / 1000., a / 1000.)).collect();
-        let bezier = spawn_bezier(&mut commands, &mut meshes, &mut materials, i, pts);
+        let pts: Vec<_> = curve
+            .control_points
+            .iter()
+            .map(|&[a, b, c]| Vec3::new(b / 1000., c / 1000., a / 1000.))
+            .collect();
+        let bezier = spawn_bezier(&mut commands, &mut meshes, &mut materials, i, pts, curve.ty);
         commands.spawn().insert(BezierHandle(i, bezier, curve.ty));
         max_id.0 += 1;
     }
@@ -380,9 +396,8 @@ fn load_height_map(
     //     .spawn_bundle(PbrBundle {
     //         mesh: asset_server.load("rro_height_map.obj"),
     //         material: materials.add(Color::rgb(0.0, 1.0, 0.0).into()),
-    //         transform: Transform::from_rotation(Quat::from_rotation_y(-std::f32::consts::PI/2.)).with_scale(Vec3::new(4.8, 4.8, 4.8)),
+    //         transform: Transform::from_rotation(Quat::from_rotation_y(-std::f32::consts::PI/2.))
+    //                                    .with_scale(Vec3::new(4.8, 4.8, 4.8)),
     //         ..Default::default()
-    //     })
-    //     .insert_bundle(bevy_mod_picking::PickableBundle::default())
-    //     .insert(bevy_transform_gizmo::GizmoTransformable);
+    //     });
 }

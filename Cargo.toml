@@ -9,9 +9,9 @@ edition = "2021"
 bevy = { version = "0.6" }
 bevy_mod_picking = "*"
 bevy_mod_raycast = "*"
-bevy_transform_gizmo = "*"
+#bevy_transform_gizmo = { path = "../bevy_transform_gizmo" }
 smooth-bevy-cameras = "*"
-bevy_egui = "0.11"
+#bevy_egui = "0.11"
 bspline = "1.1.0"
 encoding_rs = "*"
 #nfd2 = "*"
@@ -20,7 +20,6 @@ enum-utils = "0.1.2"
 
 anyhow = "1.0"
 thiserror = "1.0"
-
 obj-rs = { version = "0.7", default-features = false }
 
 [patch.crates-io]

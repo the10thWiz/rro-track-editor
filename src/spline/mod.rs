@@ -1,3 +1,22 @@
+use std::borrow::Cow;
+
+use bevy::{ecs::system::EntityCommands, prelude::*, render::mesh::Indices};
+use bevy_egui::egui::epaint::text::cursor::Cursor;
+// use bevy_transform_gizmo::TransformGizmoEvent;
+// use bspline::BSpline;
+
+// use crate::BezierSection;
+use crate::gvas::{CurveData, CurveDataOwned, SplineType};
+
+mod bezier;
+pub use bezier::CubicBezier;
+
+pub mod mesh;
+use mesh::*;
+
+// TODO: Fix
+#[derive(Debug, Component)]
+pub struct BezierSection(usize, pub Handle<Mesh>);
 
 pub struct CurvePoint {
     //points: [Vec3; 4],
@@ -30,14 +49,58 @@ pub trait Bezier: Clone {
     }
 }
 
-pub enum CurveSegment {
-    Insert,
-    Mesh(Handle<Mesh>),
-    MeshModified(Handle<Mesh>),
+#[derive(Debug, Clone)]
+pub struct BezierWalker<'a, B: Bezier + Clone + ?Sized> {
+    curve: &'a B,
+    derivative: Cow<'a, B::Derivative>,
+    t: f32,
+    step_sq: f32,
+    err_sq: f32,
+    end: f32,
+}
+
+impl<'a, B: Bezier + Clone + ?Sized> Iterator for BezierWalker<'a, B> {
+    type Item = CurvePoint;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.t >= self.end {
+            None
+        } else {
+            let cur = self.curve.eval(self.t);
+            let mut min = self.t;
+            let mut max = self.end;
+            let (point, guess) = loop {
+                let guess = (min + max) / 2.;
+                let pt = self.curve.eval(guess);
+                let dist = (cur - pt).length_squared() - self.step_sq;
+                if dist < -self.err_sq {
+                    min = guess;
+                } else if dist > self.err_sq {
+                    max = guess;
+                } else {
+                    break (pt, guess);
+                }
+                if min > self.end - 0.02 {
+                    break (self.curve.eval(self.end), self.end);
+                }
+            };
+            self.t = guess;
+            let tangent = self.derivative.eval(guess);
+            let up = Vec3::new(0.0, 0.1, 0.0);
+            let normal = tangent.cross(up).normalize() * 0.1;
+            Some(CurvePoint {
+                //points: [pt, pt + up, pt + up + normal, pt + normal],
+                point,
+                up,
+                normal,
+                tangent,
+                t: guess,
+            })
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
-enum MeshUpdate {
+pub enum MeshUpdate {
     Insert,
     Modified(Handle<Mesh>),
     None(Handle<Mesh>),
@@ -61,19 +124,23 @@ impl MeshUpdate {
     pub fn set(
         &mut self,
         assets: &mut Assets<Mesh>,
-        f: impl FnOnce() -> Mesh,
+        f: impl FnOnce(&Assets<Mesh>) -> Option<Mesh>,
     ) -> Option<Handle<Mesh>> {
         match self {
-            Self::Insert => {
-                let mesh = assets.add(f());
+            Self::Insert => if let Some(m) = f(assets) {
+                let mesh = assets.add(m);
                 *self = Self::None(mesh.clone_weak());
                 Some(mesh)
-            }
-            Self::Modified(old) => {
-                let mesh = assets.set(old.clone(), f());
+            } else {
+                None
+            },
+            Self::Modified(old) => if let Some(m) = f(assets) {
+                let mesh = assets.set(old.clone(), m);
                 *self = Self::None(mesh.clone_weak());
                 None
-            }
+            } else {
+                None
+            },
             Self::None(_) => None,
         }
     }
@@ -86,7 +153,7 @@ impl MeshUpdate {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
 pub struct PolyBezier<C: Bezier> {
     parts: Vec<C>,
     derivative: Option<Vec<C::Derivative>>,
@@ -195,22 +262,27 @@ impl PolyBezier<CubicBezier> {
         }
     }
 
-    pub fn create_meshes(&mut self, assets: &mut Assets<Mesh>) -> Vec<Handle<Mesh>> {
+    pub fn create_meshes(
+        &mut self,
+        assets: &mut Assets<Mesh>,
+        server: &AssetServer,
+    ) -> Vec<Handle<Mesh>> {
         //self.compute_derivatives();
-        const STEP: f32 = 0.1;
-        const ERR: f32 = 0.05;
+        // const STEP: f32 = 0.1;
+        // const ERR: f32 = 0.05;
         let mut ret = vec![];
         for (i, flag) in self.updates.iter_mut().enumerate() {
-            if let Some(handle) = flag.set(assets, || {
-                let walker = BezierWalker {
-                    curve: &self.parts[i],
-                    derivative: Cow::Owned(self.parts[i].derivative()),
-                    t: 0.,
-                    step_sq: STEP * STEP,
-                    err_sq: ERR * ERR,
-                    end: 1.,
-                };
-                mesh_from_curve(self.parts[i].centroid(), walker, self.ty)
+            if let Some(handle) = flag.set(assets, |assets| {
+                let mesh: Handle<Mesh> = server.load(spline_mesh(self.ty));
+                if let Some(mesh) = assets.get(mesh) {
+                    Some(mesh_on_curve(
+                        mesh,
+                        self.parts[i].centroid(),
+                        &self.parts[i],
+                    ))
+                } else {
+                    None
+                }
             }) {
                 ret.push(handle);
             }
@@ -237,23 +309,65 @@ impl PolyBezier<CubicBezier> {
         self.compute_tweens();
     }
 
-    pub fn update_transforms<'a>(
-        &self,
-        q: impl Iterator<Item = (Mut<'a, Transform>, &'a BezierSection)>,
-    ) {
-        for (mut t, s) in q {
-            if let Some(i) = self.updates.iter().position(|u| u.has(&s.1)) {
-                t.translation = self.parts[i].centroid();
-            }
+    pub fn set_ty(&mut self, ty: SplineType) {
+        self.ty = ty;
+        self.updates.iter_mut().for_each(|m| m.modified());
+    }
+
+    pub fn get_transforms<'s>(&'s self) -> impl Iterator<Item = (Vec3, &MeshUpdate)> + 's {
+        self.parts
+            .iter()
+            .map(|p| p.centroid())
+            .zip(self.updates.iter())
+    }
+
+    // pub fn update_transforms<'a>(
+    //     &self,
+    //     q: impl Iterator<Item = (Mut<'a, Transform>, &'a BezierSection)>,
+    // ) {
+    //     for (mut t, s) in q {
+    //         if let Some(i) = self.updates.iter().position(|u| u.has(&s.1)) {
+    //             t.translation = self.parts[i].centroid();
+    //         }
+    //     }
+    // }
+
+    pub fn get_control_points<'s>(&'s self) -> ControlPointIter<'s> {
+        ControlPointIter { curve: self, i: 0 }
+    }
+
+    pub fn len(&self) -> usize {
+        self.parts.len() + 1
+    }
+
+    pub fn get_control_point(&self, i: usize) -> Vec3 {
+        if i == 0 {
+            self.parts[0].pts[0]
+        } else {
+            self.parts[i - 1].pts[3]
         }
     }
 
-    pub fn get_control_points(&self) -> Vec<Vec3> {
-        let mut ret = vec![self.parts[0].pts[0]];
-        for p in self.parts.iter() {
-            ret.push(p.pts[3]);
+    pub fn ty(&self) -> SplineType {
+        self.ty
+    }
+}
+
+pub struct ControlPointIter<'a> {
+    curve: &'a PolyBezier<CubicBezier>,
+    i: usize,
+}
+
+impl<'a> Iterator for ControlPointIter<'a> {
+    type Item = Vec3;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.i < self.curve.len() {
+            let ret = self.curve.get_control_point(self.i);
+            self.i += 1;
+            Some(ret)
+        } else {
+            None
         }
-        ret
     }
 }
 
@@ -287,14 +401,14 @@ impl<C: Bezier> Bezier for PolyBezier<C> {
         }
     }
 
-    fn walker<'a>(&'a self, step: f32, err: f32) -> BezierWalker<'a, Self> {
-        BezierWalker {
-            curve: self,
-            derivative: Cow::Owned(self.derivative()),
-            t: 0.,
-            step_sq: step * step,
-            err_sq: err * err,
-            end: self.parts.len() as f32,
-        }
-    }
+    // fn walker<'a>(&'a self, step: f32, err: f32) -> BezierWalker<'a, Self> {
+    //     BezierWalker {
+    //         curve: self,
+    //         derivative: Cow::Owned(self.derivative()),
+    //         t: 0.,
+    //         step_sq: step * step,
+    //         err_sq: err * err,
+    //         end: self.parts.len() as f32,
+    //     }
+    // }
 }

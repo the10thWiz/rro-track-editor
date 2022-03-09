@@ -703,16 +703,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_transform_gizmo"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_mod_picking",
- "bevy_mod_raycast",
- "naga",
-]
-
-[[package]]
 name = "bevy_ui"
 version = "0.6.0"
 source = "git+https://github.com/bevyengine/bevy?branch=main#d8974e7c3d84189313268f475ceeff9393cedffa"
@@ -1356,6 +1346,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7896dc8abb250ffdda33912550faa54c88ec8b998dec0b2c55ab224921ce11df"
 dependencies = [
  "cfg-if 1.0.0",
+]
+
+[[package]]
+name = "enum-map"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82605a2a3d13a9661b07ba27f39d00496aa347c9c236b1a3b8201c1b6d761408"
+dependencies = [
+ "enum-map-derive",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a63b7a0ddec6f38dcec5e36257750b7a8fcaf4227e12ceb306e341d63634da05"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2757,9 +2767,9 @@ dependencies = [
  "bevy_egui",
  "bevy_mod_picking",
  "bevy_mod_raycast",
- "bevy_transform_gizmo",
  "bspline",
  "encoding_rs",
+ "enum-map",
  "enum-utils",
  "image",
  "obj-rs",

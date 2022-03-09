@@ -956,7 +956,7 @@ impl<'a> ExactSizeIterator for RROCurveIter<'a> {}
 pub use scoped::*;
 
 mod scoped {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, enum_utils::TryFromRepr)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, enum_utils::TryFromRepr, Hash, enum_map::Enum)]
     #[repr(u32)]
     pub enum SplineType {
         Track = 0,

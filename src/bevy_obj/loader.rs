@@ -43,7 +43,7 @@ async fn load_obj<'a, 'b>(
     Ok(())
 }
 
-fn load_obj_from_bytes(bytes: &[u8], mesh: &mut Mesh) -> Result<(), ObjError> {
+pub fn load_obj_from_bytes(bytes: &[u8], mesh: &mut Mesh) -> Result<(), ObjError> {
     let raw = obj::raw::parse_obj(bytes)?;
 
     // Get the most complete vertex representation
@@ -108,8 +108,15 @@ fn set_uv_data(mesh: &mut Mesh, data: Vec<[f32; 2]>) {
     mesh.set_attribute(Mesh::ATTRIBUTE_UV_0, data);
 }
 
+const INVERT_FACES: bool = false;
+
 fn set_mesh_indices<T>(mesh: &mut Mesh, obj: obj::Obj<T, u32>) {
-    mesh.set_indices(Some(Indices::U32(
-        obj.indices.iter().map(|i| *i as u32).collect(),
-    )));
+    // Invert faces
+    let mut indicies: Vec<_> = obj.indices.iter().map(|i| *i as u32).collect();
+    if INVERT_FACES {
+        for i in 0..indicies.len()/3 {
+            indicies.swap(i * 3 + 1, i * 3 + 2);
+        }
+    }
+    mesh.set_indices(Some(Indices::U32(indicies)));
 }

@@ -7,18 +7,18 @@
 use std::borrow::Cow;
 
 use bevy::{ecs::system::EntityCommands, prelude::*, render::mesh::Indices};
-use bevy_transform_gizmo::TransformGizmoEvent;
-use bspline::BSpline;
+use super::{Bezier, CurvePoint};
+// use bevy_transform_gizmo::TransformGizmoEvent;
+// use bspline::BSpline;
 
-use crate::BezierSection;
-use crate::gvas::SplineType;
+// use crate::BezierSection;
+// use crate::gvas::SplineType;
 
-
-use crate::spline_mesh::*;
+// use crate::spline_mesh::*;
 
 #[derive(Debug, Clone)]
 pub struct CubicBezier {
-    pts: [Vec3; 4],
+    pub pts: [Vec3; 4],
 }
 
 impl CubicBezier {
@@ -30,14 +30,8 @@ impl CubicBezier {
         self.pts[pt] = loc;
     }
 
-    pub fn transform(&mut self, event: &TransformGizmoEvent) -> bool {
-        for p in self.pts.iter_mut() {
-            if *p == event.from.translation {
-                *p = event.to.translation;
-                return true;
-            }
-        }
-        false
+    pub fn get_pts(&self) -> &[Vec3; 4] {
+        &self.pts
     }
 }
 
@@ -64,56 +58,6 @@ impl Bezier for CubicBezier {
                 3. * (self.pts[2] - self.pts[1]),
                 3. * (self.pts[3] - self.pts[2]),
             ],
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct BezierWalker<'a, B: Bezier + Clone + ?Sized> {
-    curve: &'a B,
-    derivative: Cow<'a, B::Derivative>,
-    t: f32,
-    step_sq: f32,
-    err_sq: f32,
-    end: f32,
-}
-
-impl<'a, B: Bezier + Clone + ?Sized> Iterator for BezierWalker<'a, B> {
-    type Item = CurvePoint;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.t >= self.end {
-            None
-        } else {
-            let cur = self.curve.eval(self.t);
-            let mut min = self.t;
-            let mut max = self.end;
-            let (point, guess) = loop {
-                let guess = (min + max) / 2.;
-                let pt = self.curve.eval(guess);
-                let dist = (cur - pt).length_squared() - self.step_sq;
-                if dist < -self.err_sq {
-                    min = guess;
-                } else if dist > self.err_sq {
-                    max = guess;
-                } else {
-                    break (pt, guess);
-                }
-                if min > self.end - 0.02 {
-                    break (self.curve.eval(self.end), self.end);
-                }
-            };
-            self.t = guess;
-            let tangent = self.derivative.eval(guess);
-            let up = Vec3::new(0.0, 0.1, 0.0);
-            let normal = tangent.cross(up).normalize() * 0.1;
-            Some(CurvePoint {
-                //points: [pt, pt + up, pt + up + normal, pt + normal],
-                point,
-                up,
-                normal,
-                tangent,
-                t: guess,
-            })
         }
     }
 }

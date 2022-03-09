@@ -7,7 +7,7 @@ Online.
 
 - [x] Save file loading
 - [ ] Track Rendering
-- [ ] Spline types
+- [x] Spline types
 - [ ] Better controls, such as locking the height
 - [ ] Spline visibility
 - [ ] Grade and Curvature calculations

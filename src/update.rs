@@ -22,7 +22,7 @@ impl Plugin for UpdatePlugin {
 #[derive(Debug, Component, Default)]
 pub struct DragState {
     pt: usize,
-    drag_start: Option<(Vec3, Vec3)>,
+    drag_start: Option<(Vec3, Vec3, Vec3)>,
     initial: Option<Transform>,
 }
 
@@ -113,7 +113,21 @@ fn update_bezier_transform(
             for (mut state, hover, trans, parent) in objects.iter_mut() {
                 if hover.hovered() {
                     state.initial = Some(trans.clone());
-                    state.drag_start = Some((trans.translation, picking_ray.direction()));
+                    let dir = if palette.lock_z {
+                        Vec3::new(0., 1., 0.)
+                    } else {
+                        picking_ray.direction()
+                    };
+                    let tmp =
+                        picking_camera.intersect_primitive(bevy_mod_picking::Primitive3d::Plane {
+                            point: trans.translation,
+                            normal: dir,
+                        });
+                    state.drag_start = Some((
+                        trans.translation,
+                        picking_ray.direction(),
+                        tmp.map_or(Vec3::ZERO, |int| int.position() - trans.translation),
+                    ));
                     if matches!(palette.action, MouseAction::Extrude) {
                         let mut bez = beziers.get_mut(parent.0.clone()).unwrap();
                         let loc = trans.translation - curve_offset(bez.ty());
@@ -170,18 +184,22 @@ fn update_bezier_transform(
         for (mut state, _sel, _trans, parent) in objects.iter_mut() {
             state.initial = None;
             state.drag_start = None;
-            section_update.send(BezierSectionUpdate { bezier: parent.0.clone() });
+            section_update.send(BezierSectionUpdate {
+                bezier: parent.0.clone(),
+            });
         }
         // Clicking on a piece of track forces an update
         for (hover, parent, _, _) in sections.iter() {
             if hover.hovered() {
-                section_update.send(BezierSectionUpdate { bezier: parent.0.clone() });
+                section_update.send(BezierSectionUpdate {
+                    bezier: parent.0.clone(),
+                });
             }
         }
     }
 
     for (state, _sel, mut trans, parent) in objects.iter_mut() {
-        if let Some((origin, dir)) = state.drag_start {
+        if let Some((origin, dir, offset)) = state.drag_start {
             let dir = if palette.lock_z {
                 Vec3::new(0., 1., 0.)
             } else {
@@ -199,12 +217,15 @@ fn update_bezier_transform(
                     None => unreachable!(),
                 };
                 init.translation += dir;
+                init.translation -= offset;
                 *trans = init;
                 let mut tmp = beziers.get_mut(parent.0).expect("No parent found");
                 let off = curve_offset(tmp.ty());
                 tmp.update(state.pt, init.translation - off);
                 // println!("Sending update");
-                section_update.send(BezierSectionUpdate { bezier: parent.0.clone() });
+                section_update.send(BezierSectionUpdate {
+                    bezier: parent.0.clone(),
+                });
             }
         }
     }
@@ -282,13 +303,15 @@ fn modify_beziers(
                         .insert_bundle(bevy_mod_picking::PickableBundle::default())
                         .insert(DragState {
                             pt: 1,
-                            drag_start: Some((start, dir)),
+                            drag_start: Some((start, dir, Vec3::ZERO)),
                             initial: Some(transform),
                         });
                 });
                 let bezier = PolyBezier::new(vec![start, start], vec![true, true], ty);
                 entity.insert(bezier);
-                section_update.send(BezierSectionUpdate { bezier: entity.id() });
+                section_update.send(BezierSectionUpdate {
+                    bezier: entity.id(),
+                });
             }
             BezierModificaiton::ChangeTy(e, old, ty) => {
                 for (mut mat, _e, parent, s) in sections.iter_mut() {
@@ -350,7 +373,11 @@ fn modify_beziers(
     }
 }
 
-fn spawn_bezier(commands: &mut Commands, assets: &DefaultAssets, first: PolyBezier<CubicBezier>) -> Option<Entity> {
+fn spawn_bezier(
+    commands: &mut Commands,
+    assets: &DefaultAssets,
+    first: PolyBezier<CubicBezier>,
+) -> Option<Entity> {
     if first.len() > 1 {
         let mut entity = commands.spawn_bundle(ParentBundle::default());
         entity.with_children(|commands| {

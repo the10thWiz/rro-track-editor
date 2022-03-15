@@ -9,7 +9,7 @@ Online.
 - [x] Track Rendering (Still needs better track model)
 - [x] Spline types
 - [ ] Better controls, such as locking the height
-- [ ] Spline visibility
+- [x] Spline visibility
 - [ ] Grade and Curvature calculations
 - [ ] Placing new splines
 - [ ] Terrain Heightmap

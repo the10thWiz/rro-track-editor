@@ -2,7 +2,7 @@ use crate::gvas::{gvas_to_vec, vec_to_gvas, CurveDataOwned, RROSave, SplineType,
 use crate::palette::FileEvent;
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
-use crate::update::{BezierModificaiton, BezierSection, DragState, UpdatePlugin};
+use crate::update::{BezierModificaiton, DragState, UpdatePlugin};
 use bevy::prelude::*;
 use enum_map::{enum_map, EnumMap};
 use std::fs::File;
@@ -33,6 +33,7 @@ pub struct DefaultAssets {
     pub handle_mesh: Handle<Mesh>,
     pub handle_material: Handle<StandardMaterial>,
     pub spline_material: EnumMap<SplineType, Handle<StandardMaterial>>,
+    pub hidden_spline_material: EnumMap<SplineType, Handle<StandardMaterial>>,
 }
 
 fn init_assets(
@@ -42,20 +43,26 @@ fn init_assets(
 ) {
     let handle_mesh = meshes.add(Mesh::from(shape::Cube { size: 0.3 }));
     let handle_material = materials.add(Color::rgb(0.8, 0.0, 0.0).into());
-    let spline_material = enum_map! {
-            SplineType::GroundWork => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::ConstGroundWork => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::Track => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::TrackBed => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::WoodBridge => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::SteelBridge => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::StoneGroundWork => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            SplineType::ConstStoneGroundWork => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+    let spline_colors = enum_map! {
+            SplineType::GroundWork => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::ConstGroundWork => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::Track => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::TrackBed => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::WoodBridge => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::SteelBridge => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::StoneGroundWork => Color::rgb(0.8, 0.7, 0.6),
+            SplineType::ConstStoneGroundWork => Color::rgb(0.8, 0.7, 0.6),
     };
+    let spline_material = spline_colors.map(|_k, e| materials.add(e.into()));
+    let hidden_spline_material = spline_colors.map(|_k, mut e| {
+        e.set_a(0.3);
+        materials.add(e.into())
+    });
     commands.insert_resource(DefaultAssets {
         handle_mesh,
         handle_material,
         spline_material,
+        hidden_spline_material,
     });
 }
 
@@ -156,7 +163,7 @@ fn load_file(
                     .insert(DragState::new(i));
             }
         });
-        let bezier = PolyBezier::new(points, curve.ty);
+        let bezier = PolyBezier::new(points, curve.visibility.iter().copied().collect(), curve.ty);
         entity.insert(bezier);
     }
     for switch in gvas.switches()? {

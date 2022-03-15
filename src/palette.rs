@@ -32,6 +32,7 @@ pub enum MouseAction {
     Extrude,
     Delete,
     Place,
+    ToggleVisibility,
     SetSplineType(SplineType),
 }
 
@@ -80,6 +81,7 @@ fn egui_system(
             ui.radio_value(&mut state.action, MouseAction::Extrude, "Extrude");
             ui.radio_value(&mut state.action, MouseAction::Delete, "Delete");
             ui.radio_value(&mut state.action, MouseAction::Place, "Place(WIP)");
+            ui.radio_value(&mut state.action, MouseAction::ToggleVisibility, "ToggleVisibility");
             for (ty, text) in SPLINE_TYPES {
                 ui.radio_value(&mut state.action, MouseAction::SetSplineType(ty), text);
             }

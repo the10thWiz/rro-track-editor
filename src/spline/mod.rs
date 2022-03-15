@@ -157,6 +157,7 @@ impl MeshUpdate {
 pub struct PolyBezier<C: Bezier> {
     parts: Vec<C>,
     updates: Vec<MeshUpdate>,
+    visibility: Vec<bool>,
     ty: SplineType,
     //meshes: Vec<Handle<Mesh>>,
 }
@@ -166,18 +167,20 @@ impl<C: Bezier> Clone for PolyBezier<C> {
         Self {
             parts: self.parts.clone(),
             updates: vec![MeshUpdate::Insert; self.updates.len()],
+            visibility: self.visibility.clone(),
             ty: self.ty,
         }
     }
 }
 
 impl PolyBezier<CubicBezier> {
-    pub fn new(points: Vec<Vec3>, ty: SplineType) -> Self {
+    pub fn new(points: Vec<Vec3>, visibility: Vec<bool>, ty: SplineType) -> Self {
         assert!(points.len() > 1);
         if points.len() == 2 {
             Self {
                 parts: vec![CubicBezier::new(points[0], points[0], points[1], points[1])],
                 updates: vec![MeshUpdate::Insert],
+                visibility,
                 ty,
             }
         } else {
@@ -193,6 +196,7 @@ impl PolyBezier<CubicBezier> {
             let mut ret = Self {
                 updates: vec![MeshUpdate::Insert; points.len() - 1],
                 parts,
+                visibility,
                 ty,
             };
             ret.compute_tweens();
@@ -250,7 +254,7 @@ impl PolyBezier<CubicBezier> {
         &mut self,
         assets: &mut Assets<Mesh>,
         server: &AssetServer,
-    ) -> Vec<Handle<Mesh>> {
+    ) -> Vec<(Handle<Mesh>, bool)> {
         //self.compute_derivatives();
         // const STEP: f32 = 0.1;
         // const ERR: f32 = 0.05;
@@ -268,7 +272,7 @@ impl PolyBezier<CubicBezier> {
                     None
                 }
             }) {
-                ret.push(handle);
+                ret.push((handle, self.visibility[i]));
             }
         }
         ret
@@ -286,7 +290,9 @@ impl PolyBezier<CubicBezier> {
         }
         self.updates.insert(pt, MeshUpdate::Insert);
         self.updates.get_mut(pt + 1).map_or((), |u| u.modified());
-        self.parts.get_mut(pt + 1).map_or((), |next| next.pts[0] = loc);
+        self.parts
+            .get_mut(pt + 1)
+            .map_or((), |next| next.pts[0] = loc);
         self.compute_tweens();
     }
 
@@ -303,36 +309,49 @@ impl PolyBezier<CubicBezier> {
     }
 
     pub fn split_pt(&self, pt: usize) -> (Self, Self) {
-        (if pt > 0 {
+        (
+            if pt > 0 {
+                Self {
+                    parts: Vec::from_iter(self.parts[..pt - 1].iter().cloned()),
+                    updates: Vec::from_iter(
+                        self.parts[..pt - 1].iter().map(|_| MeshUpdate::Insert),
+                    ),
+                    visibility: Vec::from_iter(self.visibility[..pt - 1].iter().copied()),
+                    ty: self.ty,
+                }
+            } else {
+                Self {
+                    parts: vec![],
+                    updates: vec![],
+                    visibility: vec![],
+                    ty: self.ty,
+                }
+            },
             Self {
-                parts: Vec::from_iter(self.parts[..pt-1].iter().cloned()),
-                updates: Vec::from_iter(self.parts[..pt-1].iter().map(|_| MeshUpdate::Insert)),
+                parts: Vec::from_iter(self.parts[pt + 1..].iter().cloned()),
+                updates: Vec::from_iter(self.parts[pt + 1..].iter().map(|_| MeshUpdate::Insert)),
+                visibility: Vec::from_iter(self.visibility[pt + 1..].iter().copied()),
                 ty: self.ty,
-            }
-        } else {
-            Self {
-                parts: vec![],
-                updates: vec![],
-                ty: self.ty,
-            }
-        }, Self {
-            parts: Vec::from_iter(self.parts[pt+1..].iter().cloned()),
-            updates: Vec::from_iter(self.parts[pt+1..].iter().map(|_| MeshUpdate::Insert)),
-            ty: self.ty,
-        })
+            },
+        )
     }
 
     pub fn split_sec(&self, section: &Handle<Mesh>) -> (Self, Self) {
         let pt = self.updates.iter().position(|m| m.has(section)).unwrap();
-        (Self {
-            parts: Vec::from_iter(self.parts[..pt].iter().cloned()),
-            updates: Vec::from_iter(self.parts[..pt].iter().map(|_| MeshUpdate::Insert)),
-            ty: self.ty,
-        }, Self {
-            parts: Vec::from_iter(self.parts[pt+1..].iter().cloned()),
-            updates: Vec::from_iter(self.parts[pt+1..].iter().map(|_| MeshUpdate::Insert)),
-            ty: self.ty,
-        })
+        (
+            Self {
+                parts: Vec::from_iter(self.parts[..pt].iter().cloned()),
+                updates: Vec::from_iter(self.parts[..pt].iter().map(|_| MeshUpdate::Insert)),
+                visibility: Vec::from_iter(self.visibility[..pt].iter().copied()),
+                ty: self.ty,
+            },
+            Self {
+                parts: Vec::from_iter(self.parts[pt + 1..].iter().cloned()),
+                updates: Vec::from_iter(self.parts[pt + 1..].iter().map(|_| MeshUpdate::Insert)),
+                visibility: Vec::from_iter(self.visibility[pt + 1..].iter().copied()),
+                ty: self.ty,
+            },
+        )
     }
 
     // pub fn update_transforms<'a>(
@@ -368,6 +387,23 @@ impl PolyBezier<CubicBezier> {
 
     pub fn get_segment(&self, segment: &Handle<Mesh>) -> Option<usize> {
         self.updates.iter().position(|m| m.has(segment))
+    }
+
+    pub fn segment_visible(&self, segment: &Handle<Mesh>) -> bool {
+        if let Some(i) = self.updates.iter().position(|m| m.has(segment)) {
+            self.visibility[i]
+        } else {
+            false
+        }
+    }
+
+    pub fn toggle_segment_visible(&mut self, segment: &Handle<Mesh>) -> bool {
+        if let Some(i) = self.updates.iter().position(|m| m.has(segment)) {
+            self.visibility[i] = !self.visibility[i];
+            self.visibility[i]
+        } else {
+            false
+        }
     }
 
     pub fn get_modified(&self) -> Vec<bool> {
@@ -415,6 +451,7 @@ impl<C: Bezier> Bezier for PolyBezier<C> {
         PolyBezier {
             parts: self.parts.iter().map(|b| b.derivative()).collect(),
             updates: vec![MeshUpdate::Insert; self.updates.len()],
+            visibility: self.visibility.clone(),
             ty: self.ty,
         }
     }

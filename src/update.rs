@@ -167,9 +167,16 @@ fn update_bezier_transform(
             }
         }
     } else if mouse_button_input.just_released(MouseButton::Left) {
-        for (mut state, _sel, _trans, _) in objects.iter_mut() {
+        for (mut state, _sel, _trans, parent) in objects.iter_mut() {
             state.initial = None;
             state.drag_start = None;
+            section_update.send(BezierSectionUpdate { bezier: parent.0.clone() });
+        }
+        // Clicking on a piece of track forces an update
+        for (hover, parent, _, _) in sections.iter() {
+            if hover.hovered() {
+                section_update.send(BezierSectionUpdate { bezier: parent.0.clone() });
+            }
         }
     }
 
@@ -196,6 +203,7 @@ fn update_bezier_transform(
                 let mut tmp = beziers.get_mut(parent.0).expect("No parent found");
                 let off = curve_offset(tmp.ty());
                 tmp.update(state.pt, init.translation - off);
+                // println!("Sending update");
                 section_update.send(BezierSectionUpdate { bezier: parent.0.clone() });
             }
         }
@@ -369,7 +377,7 @@ fn spawn_bezier(commands: &mut Commands, assets: &DefaultAssets, first: PolyBezi
 }
 
 pub struct BezierSectionUpdate {
-    bezier: Entity,
+    pub bezier: Entity,
 }
 
 fn update_curve_sections(
@@ -385,6 +393,7 @@ fn update_curve_sections(
     for update in section_update.iter() {
         let entity = update.bezier.clone();
         let mut bezier = beziers.get_mut(entity).unwrap();
+        println!("Has update: {:?}", bezier.ty());
         // println!("Bez: {:?}", bezier);
         for (mesh, visible) in bezier.create_meshes(&mut meshes, &server) {
             let section = commands

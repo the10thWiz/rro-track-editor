@@ -2,7 +2,7 @@ use crate::gvas::{gvas_to_vec, vec_to_gvas, CurveDataOwned, RROSave, SplineType,
 use crate::palette::FileEvent;
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
-use crate::update::{BezierModificaiton, DragState, UpdatePlugin};
+use crate::update::{BezierModificaiton, DragState, UpdatePlugin, BezierSectionUpdate};
 use bevy::prelude::*;
 use enum_map::{enum_map, EnumMap};
 use std::fs::File;
@@ -75,11 +75,12 @@ fn load_save(
     switches: Query<(Entity, &Transform, &SwitchData)>,
     mut gvas: ResMut<RROSave>,
     mut commands: Commands,
+    mut section_update: EventWriter<BezierSectionUpdate>,
 ) {
     for event in events.iter() {
         if let Err(e) = match event {
             FileEvent::Load(path) => {
-                load_file(path, &asset_server, &mut meshes, &beziers, &switches, &mut materials, &mut commands)
+                load_file(path, &asset_server, &mut meshes, &beziers, &switches, &mut materials, &mut commands, &mut section_update)
             }
             FileEvent::Save(path) => save_file(path, &beziers, &switches, &mut gvas),
         } {
@@ -128,6 +129,7 @@ fn load_file(
     switches: &Query<(Entity, &Transform, &SwitchData)>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     commands: &mut Commands,
+    section_update: &mut EventWriter<BezierSectionUpdate>,
 ) -> Result<(), crate::gvas::GVASError> {
     // Clear the world
     for (e, _c, children) in beziers.iter() {
@@ -165,6 +167,7 @@ fn load_file(
         });
         let bezier = PolyBezier::new(points, curve.visibility.iter().copied().collect(), curve.ty);
         entity.insert(bezier);
+        section_update.send(BezierSectionUpdate { bezier: entity.id() });
     }
     for switch in gvas.switches()? {
         commands

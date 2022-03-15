@@ -8,11 +8,15 @@ Online.
 - [x] Save file loading
 - [x] Track Rendering (Still needs better track model)
 - [x] Spline types
-- [ ] Better controls, such as locking the height
+- [ ] Better controls
+    - [x] Lock Z
+    - [ ] Lock slope
+    - [ ] Snapping
 - [x] Spline visibility
 - [ ] Grade and Curvature calculations
 - [ ] Placing new splines
 - [ ] Terrain Heightmap
+    - [ ] Industry locations
 - [ ] Switches and crossovers
 
 At the moment, I have no plans to include the ability to place or edit

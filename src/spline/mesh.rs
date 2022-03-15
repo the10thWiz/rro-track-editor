@@ -23,12 +23,12 @@ pub fn curve_offset(ty: SplineType) -> Vec3 {
 
 pub fn spline_mesh(ty: SplineType) -> &'static str {
     match ty {
-        SplineType::Track => "track.obj",
-        SplineType::TrackBed => "tube.obj",
-        SplineType::WoodBridge => "tube.obj",
-        SplineType::SteelBridge => "tube.obj",
-        SplineType::GroundWork | SplineType::ConstGroundWork => "groundwork.obj",
-        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => "stonewall.obj",
+        SplineType::Track => "models/track.obj",
+        SplineType::TrackBed => "models/tube.obj",
+        SplineType::WoodBridge => "models/tube.obj",
+        SplineType::SteelBridge => "models/tube.obj",
+        SplineType::GroundWork | SplineType::ConstGroundWork => "models/groundwork.obj",
+        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => "models/stonewall.obj",
     }
 }
 
@@ -103,9 +103,9 @@ fn bisect_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 
 // Offsets is a 2D shape to use as a cross section of the generated mesh. `y` is vertical according
 // to the curve.
-pub fn gen_mesh_from_curve<const N: usize>(
+pub fn gen_mesh_from_curve<C: Iterator<Item = CurvePoint>, const N: usize>(
     loc: Vec3,
-    curve: impl Iterator<Item = CurvePoint>,
+    curve: C,
     offsets: [Vec2; N],
 ) -> Mesh {
     let mut points = vec![];

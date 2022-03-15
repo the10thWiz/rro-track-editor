@@ -511,7 +511,13 @@ impl Value {
             "FloatProperty" => Self::read_float_array(r, plen),
             "StrProperty" => Self::read_str_array(r, plen),
             "TextProperty" => Self::read_text_array(r, plen),
-            a => return Err(Error::new(ErrorKind::InvalidData, format!("Unimplemented array type: {}", a)).into()),
+            a => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Unimplemented array type: {}", a),
+                )
+                .into())
+            }
         }
     }
 
@@ -892,6 +898,82 @@ impl RROSave {
             Value::Int32Array(spline_visibility_end_array);
         Ok(())
     }
+
+    pub fn switches<'a>(&'a self) -> Result<SwitchIter<'a>> {
+        Ok(SwitchIter {
+            i: 0,
+            switch_type_array: self.inner.get_prop("SwitchTypeArray")?.try_into()?,
+            switch_location_array: self.inner.get_prop("SwitchLocationArray")?.try_into()?,
+            switch_rotation_array: self.inner.get_prop("SwitchRotationArray")?.try_into()?,
+            switch_state_array: self.inner.get_prop("SwitchStateArray")?.try_into()?,
+        })
+    }
+
+    pub fn set_switches(&mut self, i: impl Iterator<Item = SwitchData>) -> Result<()> {
+        let mut switch_type_array = vec![];
+        let mut switch_location_array = vec![];
+        let mut switch_rotation_array = vec![];
+        let mut switch_state_array = vec![];
+        for switch in i {
+            switch_type_array.push(switch.ty as u32);
+            switch_location_array.push(switch.location);
+            switch_rotation_array.push(switch.rotation);
+            switch_state_array.push(switch.state);
+        }
+        *self.inner.get_prop_mut("SwitchTypeArray")? = Value::Int32Array(switch_type_array);
+        *self.inner.get_prop_mut("SwitchLocationArray")? =
+            Value::VectorArray(switch_location_array);
+        *self.inner.get_prop_mut("SwitchRotationArray")? =
+            Value::RotatorArray(switch_rotation_array);
+        *self.inner.get_prop_mut("SwitchStateArray")? = Value::Int32Array(switch_state_array);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct SwitchData {
+    pub ty: SwitchType,
+    pub location: [f32; 3],
+    pub rotation: [f32; 3],
+    pub state: u32,
+}
+
+pub struct SwitchIter<'a> {
+    i: usize,
+    switch_type_array: &'a Vec<u32>,
+    switch_location_array: &'a Vec<[f32; 3]>,
+    switch_rotation_array: &'a Vec<[f32; 3]>,
+    switch_state_array: &'a Vec<u32>,
+}
+
+impl<'a> Iterator for SwitchIter<'a> {
+    type Item = SwitchData;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.i < self.switch_location_array.len() {
+            let ty = self.switch_type_array[self.i]
+                .try_into()
+                .expect("Invalid Switch Type");
+            let location = self.switch_location_array[self.i];
+            let rotation = self.switch_rotation_array[self.i];
+            let state = self.switch_state_array[self.i];
+            self.i += 1;
+            Some(SwitchData {
+                ty,
+                location,
+                rotation,
+                state,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (
+            self.switch_location_array.len() - self.i,
+            Some(self.switch_location_array.len() - self.i),
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -932,7 +1014,9 @@ impl<'a> Iterator for RROCurveIter<'a> {
             let vis_e = self.spline_visibility_end_array[self.i] as usize;
             let curve = CurveData {
                 location: &self.spline_location_array[self.i],
-                ty: self.spline_type_array[self.i].try_into().expect("Invalid Spline Type"),
+                ty: self.spline_type_array[self.i]
+                    .try_into()
+                    .expect("Invalid Spline Type"),
                 control_points: &self.spline_control_points_array[ctrl_s..=ctrl_e],
                 visibility: &self.spline_segments_visibility_array[vis_s..=vis_e],
             };
@@ -953,9 +1037,37 @@ impl<'a> Iterator for RROCurveIter<'a> {
 
 impl<'a> ExactSizeIterator for RROCurveIter<'a> {}
 
+pub fn gvas_to_vec(arr: [f32; 3]) -> Vec3 {
+    let [a, b, c] = arr;
+    Vec3::new(-b / 1000., c / 1000., a / 1000.)
+}
+
+pub fn vec_to_gvas(v: Vec3) -> [f32; 3] {
+    [v.z * 1000., -v.x * 1000., v.y * 1000.]
+}
+
+
+// the Gvas rotator can be read like a Vector, so:
+// Rotator = [ x, y, z, ]: [f32; 3]
+// X = rotates east side over sky to west side, Y = rotates like a carussel on ground, Z rotates front over top to back
+// [a, b, c] => b = around Z, a = around x, c = around y?
+const ROT: EulerRot = EulerRot::YXZ;
+pub fn rotator_to_quat(arr: [f32; 3]) -> Quat {
+    let [a, b, c] = arr;
+    Quat::from_euler(ROT, -b.to_radians(), a.to_radians(), c.to_radians())
+}
+
+pub fn quat_to_rotator(q: Quat) -> [f32; 3] {
+    let (b, a, c) = q.to_euler(ROT);
+    [a.to_degrees(), -b.to_degrees(), c.to_degrees()]
+}
+
+use bevy::{math::{Vec3, Quat, EulerRot}, prelude::Component};
 pub use scoped::*;
 
 mod scoped {
+    use bevy::math::Vec3;
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq, enum_utils::TryFromRepr, Hash, enum_map::Enum)]
     #[repr(u32)]
     pub enum SplineType {
@@ -967,5 +1079,49 @@ mod scoped {
         ConstGroundWork = 2,
         StoneGroundWork = 5,
         ConstStoneGroundWork = 6,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, enum_utils::TryFromRepr, Hash, enum_map::Enum)]
+    #[repr(u32)]
+    pub enum SwitchType {
+        SwitchLeft = 0,
+        SwitchLeftAlt = 5,
+        SwitchRight = 1,
+        SwitchRightAlt = 4,
+        Crossover90 = 6,
+    }
+
+    impl SwitchType {
+        pub fn scale(&self) -> Vec3 {
+            match self {
+                Self::SwitchLeft | Self::SwitchLeftAlt => Vec3::new(-0.1, 0.1, -0.1),
+                _ => Vec3::new(-0.1, 0.1, 0.1),
+            }
+        }
+        pub fn model(&self) -> &'static str {
+            match self {
+                Self::Crossover90 => "models/switch.obj",
+                _ => "models/switch.obj",
+            }
+        }
+    }
+}
+
+pub use tmp::do_test;
+
+mod tmp {
+    use std::{path::PathBuf, fs::File};
+
+    use crate::gvas::GVASFile;
+
+    pub fn do_test() {
+        // let path = PathBuf::from(std::env::var("LOCALAPPDATA").expect("Could not find local appdata"))
+        //     .join("arr")
+        //     .join("Saved")
+        //     .join("SaveGames")
+        //     .join("slot10.sav");
+        // let gvas = GVASFile::read(&mut File::open(path).unwrap()).unwrap();
+        // println!("P: {:?}", gvas.get_prop("PlayerRotationArray"));
+        // panic!()
     }
 }

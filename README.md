@@ -6,7 +6,7 @@ Online.
 ## TODO
 
 - [x] Save file loading
-- [ ] Track Rendering
+- [x] Track Rendering (Still needs better track model)
 - [x] Spline types
 - [ ] Better controls, such as locking the height
 - [ ] Spline visibility
@@ -14,6 +14,12 @@ Online.
 - [ ] Placing new splines
 - [ ] Terrain Heightmap
 - [ ] Switches and crossovers
+
+At the moment, I have no plans to include the ability to place or edit
+the industries, or even the other buildings. I also have no intention
+of adding the ability to edit the vegetation.
+
+Railroads Online does not (yet) provide the ability to edit the terrain.
 
 ## Compiling
 
@@ -27,7 +33,6 @@ are faster on nightly.
 
 - Camera panning: Drag with the right mouse
 - Camera rotation: Drag with the control key held
-- Extrude: `E` while dragging a control point.
 
 ## Curves
 

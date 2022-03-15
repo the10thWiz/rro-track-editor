@@ -15,6 +15,7 @@ use bevy::{
 };
 use bevy_mod_picking::{Hover, PickingCamera, Selection};
 
+use gvas::do_test;
 use image::ImageFormat;
 use smooth_bevy_cameras::controllers::orbit::{
     OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
@@ -32,6 +33,7 @@ mod gvas;
 mod palette;
 mod control;
 mod snaps;
+mod update;
 // mod curve;
 // mod spline_mesh;
 // use spline_mesh::curve_offset;
@@ -40,6 +42,7 @@ mod snaps;
 // use gvas::{RROSave, SplineType};
 
 fn main() {
+    do_test();
     App::new()
         .insert_resource(Msaa { samples: 4 })
         // .insert_resource(rro)
@@ -52,6 +55,7 @@ fn main() {
         .add_plugin(bevy_egui::EguiPlugin)
         .add_plugin(ObjPlugin)// Temp workaround to get bevy_obj to work
         .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
+        // .add_plugins(bevy_transform_gizmo::)
         // .add_plugin(button::Buttons)
         // .add_plugin(menu::MenuPlugin)
         .add_plugin(palette::PalettePlugin)
@@ -101,6 +105,7 @@ fn main() {
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {

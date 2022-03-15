@@ -1,5 +1,7 @@
 use anyhow::Result;
 use bevy::asset::{AssetLoader, LoadContext, LoadedAsset};
+use bevy::math::Vec3;
+use bevy::render::mesh::VertexAttributeValues;
 use bevy::render::{
     mesh::{Indices, Mesh},
     render_resource::PrimitiveTopology,
@@ -108,13 +110,23 @@ fn set_uv_data(mesh: &mut Mesh, data: Vec<[f32; 2]>) {
     mesh.set_attribute(Mesh::ATTRIBUTE_UV_0, data);
 }
 
-const INVERT_FACES: bool = false;
-
 fn set_mesh_indices<T>(mesh: &mut Mesh, obj: obj::Obj<T, u32>) {
     // Invert faces
     let mut indicies: Vec<_> = obj.indices.iter().map(|i| *i as u32).collect();
-    if INVERT_FACES {
-        for i in 0..indicies.len()/3 {
+    let pos = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        Some(VertexAttributeValues::Float32x3(v)) => v,
+        _ => panic!("This should never happen"),
+    };
+    let normal = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+        Some(VertexAttributeValues::Float32x3(v)) => v,
+        _ => panic!("This should never happen"),
+    };
+    for i in 0..indicies.len()/3 {
+        let (a, b, c) = (indicies[i*3] as usize, indicies[i*3+1] as usize, indicies[i*3+2] as usize);
+        let ab = Vec3::new(pos[a][0] - pos[b][0], pos[a][1] - pos[b][1], pos[a][2] - pos[b][2]);
+        let ac = Vec3::new(pos[a][0] - pos[c][0], pos[a][1] - pos[c][1], pos[a][2] - pos[c][2]);
+        let dot = ab.cross(ac).dot(Vec3::new(normal[a][0], normal[a][1], normal[a][2]));
+        if dot < 0. {
             indicies.swap(i * 3 + 1, i * 3 + 2);
         }
     }

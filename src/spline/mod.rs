@@ -1,12 +1,7 @@
 use std::borrow::Cow;
 
-use bevy::{ecs::system::EntityCommands, prelude::*, render::mesh::Indices};
-use bevy_egui::egui::epaint::text::cursor::Cursor;
-// use bevy_transform_gizmo::TransformGizmoEvent;
-// use bspline::BSpline;
-
-// use crate::BezierSection;
-use crate::gvas::{CurveData, CurveDataOwned, SplineType};
+use crate::gvas::SplineType;
+use bevy::prelude::*;
 
 mod bezier;
 pub use bezier::CubicBezier;
@@ -114,6 +109,7 @@ impl MeshUpdate {
         }
     }
 
+    #[allow(unused)]
     pub fn is_modified(&self) -> bool {
         match self {
             Self::None(_) => false,
@@ -127,20 +123,24 @@ impl MeshUpdate {
         f: impl FnOnce(&Assets<Mesh>) -> Option<Mesh>,
     ) -> Option<Handle<Mesh>> {
         match self {
-            Self::Insert => if let Some(m) = f(assets) {
-                let mesh = assets.add(m);
-                *self = Self::None(mesh.clone_weak());
-                Some(mesh)
-            } else {
-                None
-            },
-            Self::Modified(old) => if let Some(m) = f(assets) {
-                let mesh = assets.set(old.clone(), m);
-                *self = Self::None(mesh.clone_weak());
-                None
-            } else {
-                None
-            },
+            Self::Insert => {
+                if let Some(m) = f(assets) {
+                    let mesh = assets.add(m);
+                    *self = Self::None(mesh.clone_weak());
+                    Some(mesh)
+                } else {
+                    None
+                }
+            }
+            Self::Modified(old) => {
+                if let Some(m) = f(assets) {
+                    let mesh = assets.set(old.clone(), m);
+                    *self = Self::None(mesh.clone_weak());
+                    None
+                } else {
+                    None
+                }
+            }
             Self::None(_) => None,
         }
     }
@@ -156,7 +156,6 @@ impl MeshUpdate {
 #[derive(Debug, Component)]
 pub struct PolyBezier<C: Bezier> {
     parts: Vec<C>,
-    derivative: Option<Vec<C::Derivative>>,
     updates: Vec<MeshUpdate>,
     ty: SplineType,
     //meshes: Vec<Handle<Mesh>>,
@@ -166,7 +165,6 @@ impl<C: Bezier> Clone for PolyBezier<C> {
     fn clone(&self) -> Self {
         Self {
             parts: self.parts.clone(),
-            derivative: self.derivative.clone(),
             updates: vec![MeshUpdate::Insert; self.updates.len()],
             ty: self.ty,
         }
@@ -179,7 +177,6 @@ impl PolyBezier<CubicBezier> {
         if points.len() == 2 {
             Self {
                 parts: vec![CubicBezier::new(points[0], points[0], points[1], points[1])],
-                derivative: None,
                 updates: vec![MeshUpdate::Insert],
                 ty,
             }
@@ -195,7 +192,6 @@ impl PolyBezier<CubicBezier> {
             }
             let mut ret = Self {
                 updates: vec![MeshUpdate::Insert; points.len() - 1],
-                derivative: None,
                 parts,
                 ty,
             };
@@ -250,18 +246,6 @@ impl PolyBezier<CubicBezier> {
         self.parts[pt - 1].pts[2] = (self.parts[pt - 1].pts[3] + self.parts[pt - 1].pts[1]) / 2.;
     }
 
-    pub fn compute_derivatives(&mut self) {
-        if let Some(d) = &mut self.derivative {
-            for (i, d) in d.iter_mut().enumerate() {
-                if (self.updates[i]).is_modified() {
-                    *d = self.parts[i].derivative();
-                }
-            }
-        } else {
-            self.derivative = Some(self.parts.iter().map(|c| c.derivative()).collect());
-        }
-    }
-
     pub fn create_meshes(
         &mut self,
         assets: &mut Assets<Mesh>,
@@ -294,18 +278,15 @@ impl PolyBezier<CubicBezier> {
         if pt > 0 {
             let new = CubicBezier::new(self.parts[pt - 1].pts[3], Vec3::ZERO, Vec3::ZERO, loc);
             self.parts.insert(pt, new);
+            self.updates.get_mut(pt - 1).map_or((), |u| u.modified());
+            self.updates.get_mut(pt - 1).map_or((), |u| u.modified());
         } else {
             let new = CubicBezier::new(self.parts[pt].pts[0], Vec3::ZERO, Vec3::ZERO, loc);
             self.parts.insert(pt, new);
         }
-        if let Some(next) = self.parts.get_mut(pt + 1) {
-            next.pts[0] = loc;
-        }
-        if pt > 0 {
-            self.updates.get_mut(pt - 1).map_or((), |u| u.modified());
-        }
         self.updates.insert(pt, MeshUpdate::Insert);
         self.updates.get_mut(pt + 1).map_or((), |u| u.modified());
+        self.parts.get_mut(pt + 1).map_or((), |next| next.pts[0] = loc);
         self.compute_tweens();
     }
 
@@ -319,6 +300,39 @@ impl PolyBezier<CubicBezier> {
             .iter()
             .map(|p| p.centroid())
             .zip(self.updates.iter())
+    }
+
+    pub fn split_pt(&self, pt: usize) -> (Self, Self) {
+        (if pt > 0 {
+            Self {
+                parts: Vec::from_iter(self.parts[..pt-1].iter().cloned()),
+                updates: Vec::from_iter(self.parts[..pt-1].iter().map(|_| MeshUpdate::Insert)),
+                ty: self.ty,
+            }
+        } else {
+            Self {
+                parts: vec![],
+                updates: vec![],
+                ty: self.ty,
+            }
+        }, Self {
+            parts: Vec::from_iter(self.parts[pt+1..].iter().cloned()),
+            updates: Vec::from_iter(self.parts[pt+1..].iter().map(|_| MeshUpdate::Insert)),
+            ty: self.ty,
+        })
+    }
+
+    pub fn split_sec(&self, section: &Handle<Mesh>) -> (Self, Self) {
+        let pt = self.updates.iter().position(|m| m.has(section)).unwrap();
+        (Self {
+            parts: Vec::from_iter(self.parts[..pt].iter().cloned()),
+            updates: Vec::from_iter(self.parts[..pt].iter().map(|_| MeshUpdate::Insert)),
+            ty: self.ty,
+        }, Self {
+            parts: Vec::from_iter(self.parts[pt+1..].iter().cloned()),
+            updates: Vec::from_iter(self.parts[pt+1..].iter().map(|_| MeshUpdate::Insert)),
+            ty: self.ty,
+        })
     }
 
     // pub fn update_transforms<'a>(
@@ -350,6 +364,14 @@ impl PolyBezier<CubicBezier> {
 
     pub fn ty(&self) -> SplineType {
         self.ty
+    }
+
+    pub fn get_segment(&self, segment: &Handle<Mesh>) -> Option<usize> {
+        self.updates.iter().position(|m| m.has(segment))
+    }
+
+    pub fn get_modified(&self) -> Vec<bool> {
+        self.updates.iter().map(|m| m.is_modified()).collect()
     }
 }
 
@@ -391,11 +413,7 @@ impl<C: Bezier> Bezier for PolyBezier<C> {
 
     fn derivative(&self) -> Self::Derivative {
         PolyBezier {
-            parts: self
-                .derivative
-                .clone()
-                .unwrap_or_else(|| self.parts.iter().map(|b| b.derivative()).collect()),
-            derivative: None,
+            parts: self.parts.iter().map(|b| b.derivative()).collect(),
             updates: vec![MeshUpdate::Insert; self.updates.len()],
             ty: self.ty,
         }

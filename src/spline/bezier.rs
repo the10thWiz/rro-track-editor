@@ -4,17 +4,8 @@
 // Distributed under terms of the MIT license.
 //
 
-use std::borrow::Cow;
-
-use bevy::{ecs::system::EntityCommands, prelude::*, render::mesh::Indices};
-use super::{Bezier, CurvePoint};
-// use bevy_transform_gizmo::TransformGizmoEvent;
-// use bspline::BSpline;
-
-// use crate::BezierSection;
-// use crate::gvas::SplineType;
-
-// use crate::spline_mesh::*;
+use bevy::prelude::*;
+use super::Bezier;
 
 #[derive(Debug, Clone)]
 pub struct CubicBezier {
@@ -24,10 +15,6 @@ pub struct CubicBezier {
 impl CubicBezier {
     pub fn new(a: Vec3, b: Vec3, c: Vec3, d: Vec3) -> Self {
         Self { pts: [a, b, c, d] }
-    }
-
-    pub fn update(&mut self, pt: usize, loc: Vec3) {
-        self.pts[pt] = loc;
     }
 
     pub fn get_pts(&self) -> &[Vec3; 4] {
@@ -67,12 +54,6 @@ pub struct QuadraticBezier {
     pts: [Vec3; 3],
 }
 
-impl QuadraticBezier {
-    pub fn new(a: Vec3, b: Vec3, c: Vec3) -> Self {
-        Self { pts: [a, b, c] }
-    }
-}
-
 impl Bezier for QuadraticBezier {
     type Derivative = Line;
 
@@ -102,12 +83,6 @@ pub struct Line {
     pts: [Vec3; 2],
 }
 
-impl Line {
-    pub fn new(a: Vec3, b: Vec3) -> Self {
-        Self { pts: [a, b] }
-    }
-}
-
 impl Bezier for Line {
     type Derivative = Vec3;
 
@@ -129,7 +104,7 @@ impl Bezier for Vec3 {
     type Derivative = Vec3;
 
     /// Evaluate the curve at point t
-    fn eval(&self, t: f32) -> Vec3 {
+    fn eval(&self, _t: f32) -> Vec3 {
         *self
     }
 

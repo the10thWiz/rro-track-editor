@@ -42,7 +42,7 @@ fn init_assets(
 ) {
     let handle_mesh = meshes.add(Mesh::from(shape::Cube { size: 0.3 }));
     let handle_material = materials.add(Color::rgb(0.8, 0.0, 0.0).into());
-    let mut spline_material = enum_map! {
+    let spline_material = enum_map! {
             SplineType::GroundWork => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
             SplineType::ConstGroundWork => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
             SplineType::Track => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
@@ -65,7 +65,6 @@ fn load_save(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     beziers: Query<(Entity, &PolyBezier<CubicBezier>, &Children)>,
-    sections: Query<Entity, With<BezierSection>>,
     switches: Query<(Entity, &Transform, &SwitchData)>,
     mut gvas: ResMut<RROSave>,
     mut commands: Commands,
@@ -73,7 +72,7 @@ fn load_save(
     for event in events.iter() {
         if let Err(e) = match event {
             FileEvent::Load(path) => {
-                load_file(path, &asset_server, &mut meshes, &beziers, &sections, &switches, &mut materials, &mut commands)
+                load_file(path, &asset_server, &mut meshes, &beziers, &switches, &mut materials, &mut commands)
             }
             FileEvent::Save(path) => save_file(path, &beziers, &switches, &mut gvas),
         } {
@@ -119,7 +118,6 @@ fn load_file(
     asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
     beziers: &Query<(Entity, &PolyBezier<CubicBezier>, &Children)>,
-    sections: &Query<Entity, With<BezierSection>>,
     switches: &Query<(Entity, &Transform, &SwitchData)>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     commands: &mut Commands,
@@ -130,9 +128,6 @@ fn load_file(
         for child in children.iter() {
             commands.entity(*child).despawn();
         }
-    }
-    for e in sections.iter() {
-        commands.entity(e).despawn();
     }
     for (e, _t, _s) in switches.iter() {
         commands.entity(e).despawn();

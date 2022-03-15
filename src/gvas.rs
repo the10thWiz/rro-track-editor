@@ -1,5 +1,4 @@
 use std::{
-    fs::File,
     io::{Error, ErrorKind, Read, Seek, SeekFrom, Write},
     mem::size_of,
 };
@@ -1104,24 +1103,5 @@ mod scoped {
                 _ => "models/switch.obj",
             }
         }
-    }
-}
-
-pub use tmp::do_test;
-
-mod tmp {
-    use std::{path::PathBuf, fs::File};
-
-    use crate::gvas::GVASFile;
-
-    pub fn do_test() {
-        // let path = PathBuf::from(std::env::var("LOCALAPPDATA").expect("Could not find local appdata"))
-        //     .join("arr")
-        //     .join("Saved")
-        //     .join("SaveGames")
-        //     .join("slot10.sav");
-        // let gvas = GVASFile::read(&mut File::open(path).unwrap()).unwrap();
-        // println!("P: {:?}", gvas.get_prop("PlayerRotationArray"));
-        // panic!()
     }
 }

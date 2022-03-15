@@ -27,7 +27,10 @@ pub struct DragState {
 
 impl DragState {
     pub fn new(pt: usize) -> Self {
-        Self { pt, ..Default::default() }
+        Self {
+            pt,
+            ..Default::default()
+        }
     }
 }
 
@@ -37,7 +40,8 @@ pub struct BezierSection(Handle<Mesh>);
 #[derive(Debug, Clone, PartialEq)]
 pub enum BezierModificaiton {
     Extrude(Entity, usize),
-    Delete(Entity, usize),
+    DeletePt(Entity, usize),
+    DeleteSection(Entity, Handle<Mesh>),
     Place(Vec3, Vec3),
     ChangeTy(Entity, SplineType, SplineType),
 }
@@ -45,6 +49,7 @@ pub enum BezierModificaiton {
 fn debugging(
     keyboard: Res<Input<KeyCode>>,
     objects: Query<(&Hover, &Transform, &Parent, &DragState)>,
+    sections: Query<(&Hover, &Parent, &BezierSection)>,
     beziers: Query<&PolyBezier<CubicBezier>>,
     switches: Query<(&Hover, &Transform, &SwitchData)>,
 ) {
@@ -63,6 +68,15 @@ fn debugging(
                 println!("Switch: {:?}, trans: {:?}", state, trans);
             }
         }
+        for (hover, parent, section) in sections.iter() {
+            if hover.hovered() {
+                let bez = beziers.get(parent.0.clone()).unwrap();
+                print!("Bezier: {:?}, ", bez.get_control_points().collect::<Vec<_>>());
+                print!("segement: {:?}, ", bez.get_segment(&section.0));
+                print!("modified: {:?}, ", bez.get_modified());
+                println!();
+            }
+        }
     }
 }
 
@@ -70,6 +84,7 @@ fn update_bezier_transform(
     pick_cam: Query<&PickingCamera>,
     mouse_button_input: Res<Input<MouseButton>>,
     mut objects: Query<(&mut DragState, &Hover, &mut Transform, &Parent)>,
+    sections: Query<(&Hover, &Parent, &BezierSection)>,
     mut beziers: Query<&mut PolyBezier<CubicBezier>>,
     mut palette: ResMut<Palette>,
     mut modification: EventWriter<BezierModificaiton>,
@@ -108,10 +123,23 @@ fn update_bezier_transform(
                 picking_ray.direction(),
             ));
         } else if matches!(palette.action, MouseAction::Delete) {
+            let mut found_hover = false;
             for (state, hover, _trans, parent) in objects.iter() {
                 if hover.hovered() {
-                    modification.send(BezierModificaiton::Delete(parent.0.clone(), state.pt));
+                    modification.send(BezierModificaiton::DeletePt(parent.0.clone(), state.pt));
+                    found_hover = true;
                     break;
+                }
+            }
+            if !found_hover {
+                for (hover, parent, sec) in sections.iter() {
+                    if hover.hovered() {
+                        modification.send(BezierModificaiton::DeleteSection(
+                            parent.0.clone(),
+                            sec.0.clone(),
+                        ));
+                        break;
+                    }
                 }
             }
         } else if let MouseAction::SetSplineType(ty) = palette.action {
@@ -162,32 +190,39 @@ fn update_bezier_transform(
 fn modify_beziers(
     mut modifications: EventReader<BezierModificaiton>,
     mut commands: Commands,
-    mut objects: Query<(&mut DragState, &mut Transform, &Parent)>,
-    mut beziers: Query<&mut PolyBezier<CubicBezier>>,
-    mut sections: Query<(&mut Handle<StandardMaterial>, &Parent), With<BezierSection>>,
+    mut objects: Query<(&mut DragState, &mut Transform, &Parent, Entity)>,
+    beziers: Query<(&PolyBezier<CubicBezier>, Entity, &Children)>,
+    mut sections: Query<(
+        &mut Handle<StandardMaterial>,
+        Entity,
+        &Parent,
+        &BezierSection,
+    )>,
     assets: Res<DefaultAssets>,
 ) {
     for modification in modifications.iter() {
         match modification {
             &BezierModificaiton::Extrude(e, pt) => {
-                for (mut state, _t, parent) in objects.iter_mut() {
+                for (mut state, _t, parent, _e) in objects.iter_mut() {
                     if parent.0 == e && state.pt >= pt {
                         state.pt += 1;
                     }
                 }
-                let bez = beziers.get(e).unwrap();
+                let (bez, _e, _c) = beziers.get(e).unwrap();
+                let loc = bez.get_control_point(pt);
                 println!(
                     "Extrude: {}, {}, {:?}",
-                    bez.get_control_point(pt),
+                    loc,
                     pt,
                     bez.ty()
                 );
+                // bez.insert(pt, loc);
                 let child = commands
                     .spawn_bundle(PbrBundle {
                         mesh: assets.handle_mesh.clone(),
                         material: assets.handle_material.clone(),
                         transform: Transform::from_translation(
-                            bez.get_control_point(pt) + curve_offset(bez.ty()),
+                            loc + curve_offset(bez.ty()),
                         ),
                         ..Default::default()
                     })
@@ -237,24 +272,64 @@ fn modify_beziers(
                 entity.insert(bezier);
             }
             BezierModificaiton::ChangeTy(e, old, ty) => {
-                for (mut mat, parent) in sections.iter_mut() {
+                for (mut mat, _e, parent, _s) in sections.iter_mut() {
                     if &parent.0 == e {
                         *mat = assets.spline_material[*ty].clone();
                     }
                 }
                 let handle_diff = curve_offset(*ty) - curve_offset(*old);
                 if handle_diff != Vec3::ZERO {
-                    for (_state, mut trans, parent) in objects.iter_mut() {
+                    for (_state, mut trans, parent, _e) in objects.iter_mut() {
                         if &parent.0 == e {
                             trans.translation += handle_diff;
                         }
                     }
                 }
             }
-            BezierModificaiton::Delete(e, pt) => {
-                todo!("delete");
+            BezierModificaiton::DeletePt(e, pt) => {
+                let (first, entity, children) = beziers.get(e.clone()).unwrap();
+                let (first, second) = first.split_pt(*pt);
+                commands.entity(entity).despawn();
+                for child in children.iter() {
+                    commands.entity(child.clone()).despawn();
+                }
+                spawn_bezier(&mut commands, &assets, first);
+                spawn_bezier(&mut commands, &assets, second);
+            }
+            BezierModificaiton::DeleteSection(e, section) => {
+                let (first, entity, children) = beziers.get(e.clone()).unwrap();
+                let (first, second) = first.split_sec(section);
+                commands.entity(entity).despawn();
+                for child in children.iter() {
+                    commands.entity(child.clone()).despawn();
+                }
+                spawn_bezier(&mut commands, &assets, first);
+                spawn_bezier(&mut commands, &assets, second);
             }
         }
+    }
+}
+
+fn spawn_bezier(commands: &mut Commands, assets: &DefaultAssets, first: PolyBezier<CubicBezier>) {
+    if first.len() > 1 {
+        let mut entity = commands.spawn_bundle(ParentBundle::default());
+        entity.with_children(|commands| {
+            for (pt, loc) in first.get_control_points().enumerate() {
+                commands
+                    .spawn_bundle(PbrBundle {
+                        mesh: assets.handle_mesh.clone(),
+                        material: assets.handle_material.clone(),
+                        transform: Transform::from_translation(loc + curve_offset(first.ty())),
+                        ..Default::default()
+                    })
+                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert(DragState {
+                        pt,
+                        ..DragState::default()
+                    });
+            }
+        });
+        entity.insert(first);
     }
 }
 
@@ -263,20 +338,23 @@ fn update_curve_sections(
     server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     assets: Res<DefaultAssets>,
-    mut beziers: Query<&mut PolyBezier<CubicBezier>>,
+    mut beziers: Query<(&mut PolyBezier<CubicBezier>, Entity)>,
     mut sections: Query<(&mut Transform, &BezierSection)>,
 ) {
     let start = Instant::now();
-    for mut bezier in beziers.iter_mut() {
+    for (mut bezier, entity) in beziers.iter_mut() {
+        // println!("Bez: {:?}", bezier);
         for mesh in bezier.create_meshes(&mut meshes, &server) {
-            commands
+            let section = commands
                 .spawn_bundle(PbrBundle {
                     mesh: mesh.clone(),
                     material: assets.spline_material[bezier.ty()].clone(),
                     ..Default::default()
                 })
                 .insert_bundle(bevy_mod_picking::PickableBundle::default())
-                .insert(BezierSection(mesh));
+                .insert(BezierSection(mesh))
+                .id();
+            commands.entity(entity).add_child(section);
         }
         for (translation, mesh) in bezier.get_transforms() {
             for (mut trans, section) in sections.iter_mut() {
@@ -324,8 +402,3 @@ fn update_curve_sections(
 //                         pt: pt + 1,
 //                         ..DragState::default()
 //                     });
-
-use bevy::{
-    math::Vec3,
-    prelude::{Component, Transform},
-};

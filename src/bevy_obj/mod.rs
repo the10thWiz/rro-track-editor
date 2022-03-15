@@ -1,7 +1,6 @@
 mod loader;
 pub use loader::*;
 
-use bevy::app::prelude::*;
 use bevy::asset::AddAsset;
 use bevy::app::{App, Plugin};
 

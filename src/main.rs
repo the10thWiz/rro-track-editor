@@ -1,22 +1,4 @@
-use std::{
-    fs::File,
-    ops::{Add, Mul, Sub},
-    time::{Duration, Instant}, path::PathBuf,
-};
-
-use bevy::{
-    pbr::wireframe::{Wireframe, WireframePlugin},
-    prelude::*,
-    reflect::TypeUuid,
-    render::{
-        mesh::Indices,
-        primitives::{Frustum, Plane},
-    },
-};
-use bevy_mod_picking::{Hover, PickingCamera, Selection};
-
-use gvas::do_test;
-use image::ImageFormat;
+use bevy::{pbr::wireframe::WireframePlugin, prelude::*};
 use smooth_bevy_cameras::controllers::orbit::{
     OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
 };
@@ -26,12 +8,12 @@ use bevy_obj::*;
 
 // mod button;
 mod background;
-mod spline;
 mod gvas;
+mod spline;
 
 // mod menu;
-mod palette;
 mod control;
+mod palette;
 mod snaps;
 mod update;
 // mod curve;
@@ -42,7 +24,6 @@ mod update;
 // use gvas::{RROSave, SplineType};
 
 fn main() {
-    do_test();
     App::new()
         .insert_resource(Msaa { samples: 4 })
         // .insert_resource(rro)
@@ -53,7 +34,7 @@ fn main() {
         .add_plugin(OrbitCameraPlugin::default())
         .add_plugin(WireframePlugin)
         .add_plugin(bevy_egui::EguiPlugin)
-        .add_plugin(ObjPlugin)// Temp workaround to get bevy_obj to work
+        .add_plugin(ObjPlugin) // Temp workaround to get bevy_obj to work
         .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
         // .add_plugins(bevy_transform_gizmo::)
         // .add_plugin(button::Buttons)
@@ -103,21 +84,15 @@ fn main() {
 // }
 
 /// set up a simple 3D scene
-fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    commands
-        .spawn_bundle(DirectionalLightBundle {
-            directional_light: DirectionalLight {
-                illuminance: 1000.,
-                ..Default::default()
-            },
-            transform: Transform::from_rotation(Quat::from_rotation_x(0.8)),
+fn setup(mut commands: Commands) {
+    commands.spawn_bundle(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 1000.,
             ..Default::default()
-        });
+        },
+        transform: Transform::from_rotation(Quat::from_rotation_x(0.8)),
+        ..Default::default()
+    });
     // camera
     commands
         .spawn_bundle(OrbitCameraBundle::new(

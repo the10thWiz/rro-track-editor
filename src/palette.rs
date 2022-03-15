@@ -78,7 +78,7 @@ fn egui_system(
             ui.label("Actions");
             ui.radio_value(&mut state.action, MouseAction::Drag, "Drag");
             ui.radio_value(&mut state.action, MouseAction::Extrude, "Extrude");
-            ui.radio_value(&mut state.action, MouseAction::Delete, "Delete(WIP)");
+            ui.radio_value(&mut state.action, MouseAction::Delete, "Delete");
             ui.radio_value(&mut state.action, MouseAction::Place, "Place(WIP)");
             for (ty, text) in SPLINE_TYPES {
                 ui.radio_value(&mut state.action, MouseAction::SetSplineType(ty), text);

@@ -279,21 +279,56 @@ impl PolyBezier<CubicBezier> {
     }
 
     pub fn insert(&mut self, pt: usize, loc: Vec3) {
-        if pt > 0 {
-            let new = CubicBezier::new(self.parts[pt - 1].pts[3], Vec3::ZERO, Vec3::ZERO, loc);
-            self.parts.insert(pt, new);
-            self.updates.get_mut(pt - 1).map_or((), |u| u.modified());
-            self.updates.get_mut(pt - 1).map_or((), |u| u.modified());
+        if pt == 0 {
+            // At beginning
+            self.parts
+                .insert(0, CubicBezier::new_ends(loc, self.get_control_point(0)));
+            self.updates.get_mut(0).map(|m| m.modified());
+            self.updates.get_mut(1).map(|m| m.modified());
+            self.updates.insert(0, MeshUpdate::Insert);
+            self.visibility.insert(0, true);
+        } else if pt == self.len() {
+            // At end
+            self.parts.insert(
+                pt - 1,
+                CubicBezier::new_ends(self.get_control_point(pt - 1), loc),
+            );
+            self.updates.get_mut(pt - 2).map(|m| m.modified());
+            self.updates.insert(pt - 1, MeshUpdate::Insert);
+            self.visibility.insert(pt - 1, true);
         } else {
-            let new = CubicBezier::new(self.parts[pt].pts[0], Vec3::ZERO, Vec3::ZERO, loc);
-            self.parts.insert(pt, new);
+            let before = self.get_control_point(pt - 1);
+            self.parts[pt - 1].pts[0] = loc;
+            self.parts
+                .insert(pt - 1, CubicBezier::new_ends(before, loc));
+            self.updates
+                .get_mut(pt.saturating_sub(2))
+                .map(|m| m.modified());
+            self.updates.get_mut(pt - 1).map(|m| m.modified());
+            self.updates.insert(pt - 1, MeshUpdate::Insert);
+            self.visibility.insert(pt - 1, true);
         }
-        self.updates.insert(pt, MeshUpdate::Insert);
-        self.updates.get_mut(pt + 1).map_or((), |u| u.modified());
-        self.parts
-            .get_mut(pt + 1)
-            .map_or((), |next| next.pts[0] = loc);
         self.compute_tweens();
+    }
+
+    pub fn before(&self, pt: usize, loc: Vec3) -> bool {
+        if pt == 0 {
+            let new = self.get_control_point(pt) - loc;
+            let cur = self.get_control_point(pt) - self.get_control_point(pt + 1);
+            if new.dot(cur) < 0. {
+                true
+            } else {
+                false
+            }
+        } else {
+            let new = self.get_control_point(pt) - loc;
+            let cur = self.get_control_point(pt) - self.get_control_point(pt - 1);
+            if new.dot(cur) < 0. {
+                false
+            } else {
+                true
+            }
+        }
     }
 
     pub fn set_ty(&mut self, ty: SplineType) {
@@ -309,28 +344,54 @@ impl PolyBezier<CubicBezier> {
     }
 
     pub fn split_pt(&self, pt: usize) -> (Self, Self) {
+        let end = pt.saturating_sub(1);
         (
-            if pt > 0 {
-                Self {
-                    parts: Vec::from_iter(self.parts[..pt - 1].iter().cloned()),
-                    updates: Vec::from_iter(
-                        self.parts[..pt - 1].iter().map(|_| MeshUpdate::Insert),
-                    ),
-                    visibility: Vec::from_iter(self.visibility[..pt - 1].iter().copied()),
-                    ty: self.ty,
-                }
-            } else {
-                Self {
-                    parts: vec![],
-                    updates: vec![],
-                    visibility: vec![],
-                    ty: self.ty,
-                }
+            Self {
+                parts: Vec::from_iter(
+                    self.parts
+                        .get(..end)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .cloned(),
+                ),
+                updates: Vec::from_iter(
+                    self.parts
+                        .get(..end)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .map(|_| MeshUpdate::Insert),
+                ),
+                visibility: Vec::from_iter(
+                    self.visibility
+                        .get(..end)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .copied(),
+                ),
+                ty: self.ty,
             },
             Self {
-                parts: Vec::from_iter(self.parts[pt + 1..].iter().cloned()),
-                updates: Vec::from_iter(self.parts[pt + 1..].iter().map(|_| MeshUpdate::Insert)),
-                visibility: Vec::from_iter(self.visibility[pt + 1..].iter().copied()),
+                parts: Vec::from_iter(
+                    self.parts
+                        .get(pt + 1..)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .cloned(),
+                ),
+                updates: Vec::from_iter(
+                    self.parts
+                        .get(pt + 1..)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .map(|_| MeshUpdate::Insert),
+                ),
+                visibility: Vec::from_iter(
+                    self.visibility
+                        .get(pt + 1..)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .copied(),
+                ),
                 ty: self.ty,
             },
         )
@@ -340,15 +401,45 @@ impl PolyBezier<CubicBezier> {
         let pt = self.updates.iter().position(|m| m.has(section)).unwrap();
         (
             Self {
-                parts: Vec::from_iter(self.parts[..pt].iter().cloned()),
-                updates: Vec::from_iter(self.parts[..pt].iter().map(|_| MeshUpdate::Insert)),
-                visibility: Vec::from_iter(self.visibility[..pt].iter().copied()),
+                parts: Vec::from_iter(self.parts.get(..pt).iter().flat_map(|a| a.iter()).cloned()),
+                updates: Vec::from_iter(
+                    self.parts
+                        .get(..pt)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .map(|_| MeshUpdate::Insert),
+                ),
+                visibility: Vec::from_iter(
+                    self.visibility
+                        .get(..pt)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .copied(),
+                ),
                 ty: self.ty,
             },
             Self {
-                parts: Vec::from_iter(self.parts[pt + 1..].iter().cloned()),
-                updates: Vec::from_iter(self.parts[pt + 1..].iter().map(|_| MeshUpdate::Insert)),
-                visibility: Vec::from_iter(self.visibility[pt + 1..].iter().copied()),
+                parts: Vec::from_iter(
+                    self.parts
+                        .get(pt + 1..)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .cloned(),
+                ),
+                updates: Vec::from_iter(
+                    self.parts
+                        .get(pt + 1..)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .map(|_| MeshUpdate::Insert),
+                ),
+                visibility: Vec::from_iter(
+                    self.visibility
+                        .get(pt + 1..)
+                        .iter()
+                        .flat_map(|a| a.iter())
+                        .copied(),
+                ),
                 ty: self.ty,
             },
         )

@@ -17,6 +17,10 @@ impl CubicBezier {
         Self { pts: [a, b, c, d] }
     }
 
+    pub fn new_ends(a: Vec3, b: Vec3) -> Self {
+        Self { pts: [a, Vec3::ZERO, Vec3::ZERO, b] }
+    }
+
     pub fn get_pts(&self) -> &[Vec3; 4] {
         &self.pts
     }

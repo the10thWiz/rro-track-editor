@@ -16,6 +16,7 @@ pub struct Palette {
     pub action: MouseAction,
     pub lock_z: bool,
     pub snapping: bool,
+    pub show_debug: bool,
     file_action: FileAction,
 }
 
@@ -28,11 +29,19 @@ pub enum FileAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MouseAction {
+    /// Drag individual control points
     Drag,
+    /// Extend existing splines with new control points
     Extrude,
+    /// TODO: Link existing splines end to end
+    Link,
+    /// Delete points or sections
     Delete,
+    /// Place new splines
     Place,
+    /// Toggle visibility of individual sections
     ToggleVisibility,
+    /// Set the spline type of given spline
     SetSplineType(SplineType),
 }
 
@@ -52,18 +61,25 @@ impl Plugin for PalettePlugin {
             action: MouseAction::Drag,
             file_action: FileAction::None,
             lock_z: true,
+            show_debug: cfg!(debug_assertions),
             snapping: false,
         });
         app.add_system(egui_system);
         app.add_event::<FileEvent>();
+        app.insert_resource(DebugInfo::default());
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Hash)]
+pub struct DebugInfo {
+    pub hovered: String,
+}
 
 fn egui_system(
     mut egui_context: ResMut<EguiContext>,
     mut state: ResMut<Palette>,
     mut file_events: EventWriter<FileEvent>,
+    debug_info: Res<DebugInfo>,
 ) {
     let state = state.as_mut();
     egui::Window::new("Palette")
@@ -79,6 +95,7 @@ fn egui_system(
             ui.label("Actions");
             ui.radio_value(&mut state.action, MouseAction::Drag, "Drag");
             ui.radio_value(&mut state.action, MouseAction::Extrude, "Extrude");
+            ui.radio_value(&mut state.action, MouseAction::Link, "Link(WIP)");
             ui.radio_value(&mut state.action, MouseAction::Delete, "Delete");
             ui.radio_value(&mut state.action, MouseAction::Place, "Place(WIP)");
             ui.radio_value(&mut state.action, MouseAction::ToggleVisibility, "ToggleVisibility");
@@ -87,6 +104,7 @@ fn egui_system(
             }
             ui.label("Options");
             ui.checkbox(&mut state.lock_z, "Lock Z");
+            ui.checkbox(&mut state.show_debug, "Show Debug Info");
             ui.checkbox(&mut state.snapping, "Snapping(WIP)");
         });
     if matches!(state.file_action, FileAction::Open | FileAction::Save) {
@@ -142,6 +160,14 @@ fn egui_system(
                     }
                     state.file_action = FileAction::None;
                 }
+            });
+    }
+    if state.show_debug {
+        egui::Window::new("Debugging Info")
+            .resizable(false)
+            .show(egui_context.ctx_mut(), |ui| {
+                ui.label("Hovered object:");
+                ui.code(&debug_info.hovered);
             });
     }
 }

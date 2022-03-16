@@ -1,6 +1,6 @@
 use crate::control::{DefaultAssets, ParentBundle};
 use crate::gvas::{SplineType, SwitchData};
-use crate::palette::{MouseAction, Palette};
+use crate::palette::{DebugInfo, MouseAction, Palette};
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
 use bevy::prelude::*;
@@ -49,38 +49,47 @@ pub enum BezierModificaiton {
 }
 
 fn debugging(
-    keyboard: Res<Input<KeyCode>>,
+    state: Res<Palette>,
     objects: Query<(&Hover, &Transform, &Parent, &DragState)>,
     sections: Query<(&Hover, &Parent, &BezierSection)>,
     beziers: Query<&PolyBezier<CubicBezier>>,
     switches: Query<(&Hover, &Transform, &SwitchData)>,
+    mut debug_info: ResMut<DebugInfo>,
 ) {
-    if keyboard.just_pressed(KeyCode::D) {
+    if state.show_debug {
+        let mut has_hover = false;
         for (hover, trans, parent, state) in objects.iter() {
             if hover.hovered() {
                 let bez = beziers.get(parent.0.clone()).unwrap();
-                print!("Point: {}, ", trans.translation - curve_offset(bez.ty()));
-                print!("ty: {:?}, ", bez.ty());
-                print!("pt: {}, ", state.pt);
-                println!();
+                has_hover = true;
+                debug_info.hovered = format!(
+                    "Point: {}\nty: {:?}\npt: {}",
+                    trans.translation - curve_offset(bez.ty()),
+                    bez.ty(),
+                    state.pt
+                );
             }
         }
         for (hover, trans, state) in switches.iter() {
             if hover.hovered() {
-                println!("Switch: {:?}, trans: {:?}", state, trans);
+                has_hover = true;
+                debug_info.hovered = format!("Switch: {:?}\ntrans: {:?}", state, trans);
             }
         }
         for (hover, parent, section) in sections.iter() {
             if hover.hovered() {
                 let bez = beziers.get(parent.0.clone()).unwrap();
-                print!(
-                    "Bezier: {:?}, ",
-                    bez.get_control_points().collect::<Vec<_>>()
+                has_hover = true;
+                debug_info.hovered = format!(
+                    "Bezier: {:?}\nsegement: {:?}\nmodified: {:?}",
+                    bez.get_control_points().collect::<Vec<_>>(),
+                    bez.get_segment(&section.0),
+                    bez.get_modified()
                 );
-                print!("segement: {:?}, ", bez.get_segment(&section.0));
-                print!("modified: {:?}, ", bez.get_modified());
-                println!();
             }
+        }
+        if !has_hover && debug_info.hovered != "" {
+            debug_info.hovered = format!("");
         }
     }
 }
@@ -110,7 +119,7 @@ fn update_bezier_transform(
 
     if mouse_button_input.just_pressed(MouseButton::Left) {
         if matches!(palette.action, MouseAction::Drag | MouseAction::Extrude) {
-            for (mut state, hover, trans, parent) in objects.iter_mut() {
+            for (mut state, hover, trans, _p) in objects.iter_mut() {
                 if hover.hovered() {
                     state.initial = Some(trans.clone());
                     let dir = if palette.lock_z {
@@ -128,13 +137,6 @@ fn update_bezier_transform(
                         picking_ray.direction(),
                         tmp.map_or(Vec3::ZERO, |int| int.position() - trans.translation),
                     ));
-                    if matches!(palette.action, MouseAction::Extrude) {
-                        let mut bez = beziers.get_mut(parent.0.clone()).unwrap();
-                        let loc = trans.translation - curve_offset(bez.ty());
-                        bez.insert(state.pt, loc);
-                        modification.send(BezierModificaiton::Extrude(parent.0.clone(), state.pt));
-                        palette.action = MouseAction::Drag;
-                    }
                 }
             }
         } else if matches!(palette.action, MouseAction::Place) {
@@ -211,17 +213,31 @@ fn update_bezier_transform(
                     normal: dir,
                 })
             {
-                let dir = int.position() - origin;
+                let dir = int.position() - origin - offset;
                 let mut init = match state.initial {
                     Some(initial) => initial,
                     None => unreachable!(),
                 };
                 init.translation += dir;
-                init.translation -= offset;
                 *trans = init;
-                let mut tmp = beziers.get_mut(parent.0).expect("No parent found");
-                let off = curve_offset(tmp.ty());
-                tmp.update(state.pt, init.translation - off);
+                let mut bez = beziers.get_mut(parent.0).expect("No parent found");
+                let off = curve_offset(bez.ty());
+                if dir != Vec3::ZERO {
+                    if matches!(palette.action, MouseAction::Extrude) {
+                        let loc = init.translation - off;
+                        let before = bez.before(state.pt, init.translation);
+                        println!(
+                            "Before: {}, pt: {} -> {}",
+                            before,
+                            state.pt,
+                            state.pt + if !before { 1 } else { 0 }
+                        );
+                        bez.insert(state.pt + if !before { 1 } else { 0 }, loc);
+                        modification.send(BezierModificaiton::Extrude(parent.0.clone(), state.pt));
+                        palette.action = MouseAction::Drag;
+                    }
+                }
+                bez.update(state.pt, init.translation - off);
                 // println!("Sending update");
                 section_update.send(BezierSectionUpdate {
                     bezier: parent.0.clone(),
@@ -419,40 +435,41 @@ fn update_curve_sections(
     let start = Instant::now();
     for update in section_update.iter() {
         let entity = update.bezier.clone();
-        let mut bezier = beziers.get_mut(entity).unwrap();
-        println!("Has update: {:?}", bezier.ty());
-        // println!("Bez: {:?}", bezier);
-        for (mesh, visible) in bezier.create_meshes(&mut meshes, &server) {
-            let section = commands
-                .spawn_bundle(PbrBundle {
-                    mesh: mesh.clone(),
-                    material: if visible {
-                        assets.spline_material[bezier.ty()].clone()
-                    } else {
-                        assets.hidden_spline_material[bezier.ty()].clone()
-                    },
-                    ..Default::default()
-                })
-                .insert_bundle(bevy_mod_picking::PickableBundle::default())
-                .insert(BezierSection(mesh))
-                .id();
-            commands.entity(entity).add_child(section);
-        }
-        for (translation, mesh) in bezier.get_transforms() {
-            for (mut trans, section) in sections.iter_mut() {
-                if mesh.has(&section.0) {
-                    trans.translation = translation;
-                    break;
+        if let Ok(mut bezier) = beziers.get_mut(entity) {
+            // println!("Has update: {:?}", bezier.ty());
+            // println!("Bez: {:?}", bezier);
+            for (mesh, visible) in bezier.create_meshes(&mut meshes, &server) {
+                let section = commands
+                    .spawn_bundle(PbrBundle {
+                        mesh: mesh.clone(),
+                        material: if visible {
+                            assets.spline_material[bezier.ty()].clone()
+                        } else {
+                            assets.hidden_spline_material[bezier.ty()].clone()
+                        },
+                        ..Default::default()
+                    })
+                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert(BezierSection(mesh))
+                    .id();
+                commands.entity(entity).add_child(section);
+            }
+            for (translation, mesh) in bezier.get_transforms() {
+                for (mut trans, section) in sections.iter_mut() {
+                    if mesh.has(&section.0) {
+                        trans.translation = translation;
+                        break;
+                    }
                 }
             }
-        }
-        if start.elapsed() > Duration::from_millis(20) {
-            // TODO: avoid this and enable partial application?
-            // I don't actually overrun that often, but Bevy doesn't really update as fast as I'd like here
-            // This should actually be handled by some kind of event system, so I only loop through the ones
-            // that need to be updates.
-            println!("Task overrun");
-            break;
+            if start.elapsed() > Duration::from_millis(20) {
+                // TODO: avoid this and enable partial application?
+                // I don't actually overrun that often, but Bevy doesn't really update as fast as I'd like here
+                // This should actually be handled by some kind of event system, so I only loop through the ones
+                // that need to be updates.
+                println!("Task overrun");
+                break;
+            }
         }
     }
 }

@@ -1097,11 +1097,5 @@ mod scoped {
                 _ => Vec3::new(-0.1, 0.1, 0.1),
             }
         }
-        pub fn model(&self) -> &'static str {
-            match self {
-                Self::Crossover90 => "models/switch.obj",
-                _ => "models/switch.obj",
-            }
-        }
     }
 }

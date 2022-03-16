@@ -1,13 +1,14 @@
-use crate::gvas::{gvas_to_vec, vec_to_gvas, CurveDataOwned, RROSave, SplineType, SwitchData, rotator_to_quat, quat_to_rotator};
+use crate::gvas::{gvas_to_vec, vec_to_gvas, CurveDataOwned, RROSave, SplineType, SwitchData, rotator_to_quat, quat_to_rotator, SwitchType};
 use crate::palette::FileEvent;
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
-use crate::update::{BezierModificaiton, DragState, UpdatePlugin, BezierSectionUpdate};
+use crate::update::{BezierModificaiton, DragState, UpdatePlugin, BezierSectionUpdate, SwitchDrag};
 use bevy::prelude::*;
 use enum_map::{enum_map, EnumMap};
 use std::fs::File;
 use std::path::PathBuf;
 
+/// Plugin for loading, saving, and updates
 pub struct ControlPlugin;
 
 impl Plugin for ControlPlugin {
@@ -15,7 +16,7 @@ impl Plugin for ControlPlugin {
         app.add_startup_system(init_assets);
         app.insert_resource(
             RROSave::read(&mut std::io::Cursor::new(include_bytes!(
-                "../assets/slot10.sav"
+                "../assets/default.sav"
             )))
             .expect("Failed to parse included save"),
         );
@@ -29,14 +30,19 @@ impl Plugin for ControlPlugin {
     }
 }
 
+/// Default Assets, to prevent duplicate assets where possible
 pub struct DefaultAssets {
     pub handle_mesh: Handle<Mesh>,
     pub handle_material: Handle<StandardMaterial>,
+    pub spline_mesh: EnumMap<SplineType, Handle<Mesh>>,
     pub spline_material: EnumMap<SplineType, Handle<StandardMaterial>>,
     pub hidden_spline_material: EnumMap<SplineType, Handle<StandardMaterial>>,
+    pub switch_mesh: EnumMap<SwitchType, Handle<Mesh>>,
+    pub switch_material: EnumMap<SwitchType, Handle<StandardMaterial>>,
 }
 
 fn init_assets(
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -53,24 +59,40 @@ fn init_assets(
             SplineType::StoneGroundWork => Color::rgb(0.8, 0.7, 0.6),
             SplineType::ConstStoneGroundWork => Color::rgb(0.8, 0.7, 0.6),
     };
+    let spline_mesh = enum_map! {
+        SplineType::Track => asset_server.load("models/track.obj"),
+        SplineType::TrackBed => asset_server.load("models/tube.obj"),
+        SplineType::WoodBridge => asset_server.load("models/tube.obj"),
+        SplineType::SteelBridge => asset_server.load("models/tube.obj"),
+        SplineType::GroundWork | SplineType::ConstGroundWork => asset_server.load("models/groundwork.obj"),
+        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => asset_server.load("models/stonewall.obj"),
+    };
     let spline_material = spline_colors.map(|_k, e| materials.add(e.into()));
     let hidden_spline_material = spline_colors.map(|_k, mut e| {
         e.set_a(0.3);
         materials.add(e.into())
     });
+    let switch_mesh = enum_map! {
+        SwitchType::Crossover90 => asset_server.load("models/tube.obj"),
+        _ => asset_server.load("models/switch.obj"),
+    };
+    let switch_material = enum_map! {
+        _ => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+    };
     commands.insert_resource(DefaultAssets {
         handle_mesh,
         handle_material,
+        spline_mesh,
         spline_material,
         hidden_spline_material,
+        switch_mesh,
+        switch_material,
     });
 }
 
 fn load_save(
     mut events: EventReader<FileEvent>,
-    asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    assets: Res<DefaultAssets>,
     beziers: Query<(Entity, &PolyBezier<CubicBezier>, &Children)>,
     switches: Query<(Entity, &Transform, &SwitchData)>,
     mut gvas: ResMut<RROSave>,
@@ -80,7 +102,7 @@ fn load_save(
     for event in events.iter() {
         if let Err(e) = match event {
             FileEvent::Load(path) => {
-                load_file(path, &asset_server, &mut meshes, &beziers, &switches, &mut materials, &mut commands, &mut section_update)
+                load_file(path, &assets, &beziers, &switches, &mut commands, &mut section_update)
             }
             FileEvent::Save(path) => save_file(path, &beziers, &switches, &mut gvas),
         } {
@@ -123,11 +145,9 @@ fn save_file(
 
 fn load_file(
     path: &PathBuf,
-    asset_server: &Res<AssetServer>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    assets: &Res<DefaultAssets>,
     beziers: &Query<(Entity, &PolyBezier<CubicBezier>, &Children)>,
     switches: &Query<(Entity, &Transform, &SwitchData)>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
     commands: &mut Commands,
     section_update: &mut EventWriter<BezierSectionUpdate>,
 ) -> Result<(), crate::gvas::GVASError> {
@@ -156,8 +176,8 @@ fn load_file(
                 println!("Spawning point at {}", point);
                 commands
                     .spawn_bundle(PbrBundle {
-                        mesh: meshes.add(Mesh::from(shape::Cube { size: 0.3 })),
-                        material: materials.add(Color::rgb(0.8, 0.0, 0.0).into()),
+                        mesh: assets.handle_mesh.clone(),
+                        material: assets.handle_material.clone(),
                         transform: Transform::from_translation(*point + curve_offset(curve.ty)),
                         ..Default::default()
                     })
@@ -172,8 +192,8 @@ fn load_file(
     for switch in gvas.switches()? {
         commands
             .spawn_bundle(PbrBundle {
-                mesh: asset_server.load(switch.ty.model()),
-                material: materials.add(Color::rgb(0.0, 0.8, 0.0).into()),
+                mesh: assets.switch_mesh[switch.ty].clone(),
+                material: assets.switch_material[switch.ty].clone(),
                 transform: Transform {
                     translation: gvas_to_vec(switch.location),
                     scale: switch.ty.scale(),
@@ -182,6 +202,7 @@ fn load_file(
                 ..Default::default()
             })
             .insert_bundle(bevy_mod_picking::PickableBundle::default())
+            .insert(SwitchDrag::default())
             .insert(switch);
     }
     commands.insert_resource(gvas);

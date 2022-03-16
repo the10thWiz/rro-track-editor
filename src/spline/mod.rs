@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::gvas::SplineType;
+use crate::{gvas::SplineType, control::DefaultAssets};
 use bevy::prelude::*;
 
 mod bezier;
@@ -252,16 +252,16 @@ impl PolyBezier<CubicBezier> {
 
     pub fn create_meshes(
         &mut self,
-        assets: &mut Assets<Mesh>,
-        server: &AssetServer,
+        meshes: &mut Assets<Mesh>,
+        default_assets: &Res<DefaultAssets>,
     ) -> Vec<(Handle<Mesh>, bool)> {
         //self.compute_derivatives();
         // const STEP: f32 = 0.1;
         // const ERR: f32 = 0.05;
         let mut ret = vec![];
         for (i, flag) in self.updates.iter_mut().enumerate() {
-            if let Some(handle) = flag.set(assets, |assets| {
-                let mesh: Handle<Mesh> = server.load(spline_mesh(self.ty));
+            if let Some(handle) = flag.set(meshes, |assets| {
+                let mesh = default_assets.spline_mesh[self.ty].clone();
                 if let Some(mesh) = assets.get(mesh) {
                     Some(mesh_on_curve(
                         mesh,

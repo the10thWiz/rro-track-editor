@@ -18,17 +18,6 @@ pub fn curve_offset(ty: SplineType) -> Vec3 {
     }
 }
 
-pub fn spline_mesh(ty: SplineType) -> &'static str {
-    match ty {
-        SplineType::Track => "models/track.obj",
-        SplineType::TrackBed => "models/tube.obj",
-        SplineType::WoodBridge => "models/tube.obj",
-        SplineType::SteelBridge => "models/tube.obj",
-        SplineType::GroundWork | SplineType::ConstGroundWork => "models/groundwork.obj",
-        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => "models/stonewall.obj",
-    }
-}
-
 fn matrix_between(a: Vec3, b: Vec3) -> Mat4 {
     let x = b - a;
     let y = Vec3::new(0., 1., 0.);

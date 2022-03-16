@@ -4,86 +4,33 @@ use smooth_bevy_cameras::controllers::orbit::{
 };
 
 mod bevy_obj;
-use bevy_obj::*;
 
-// mod button;
 mod background;
 mod gvas;
 mod spline;
 
-// mod menu;
 mod control;
 mod palette;
 mod snaps;
 mod update;
-// mod curve;
-// mod spline_mesh;
-// use spline_mesh::curve_offset;
-// use button::{MouseAction, MouseOptions};
-// use curve::{BSplineW, Bezier, CubicBezier, PolyBezier};
-// use gvas::{RROSave, SplineType};
 
 fn main() {
     App::new()
         .insert_resource(Msaa { samples: 4 })
-        // .insert_resource(rro)
-        // .insert_resource(path)
-        // .insert_resource(BezierIDMax(0))
         .add_plugins(DefaultPlugins)
         .add_plugin(smooth_bevy_cameras::LookTransformPlugin)
         .add_plugin(OrbitCameraPlugin::default())
         .add_plugin(WireframePlugin)
         .add_plugin(bevy_egui::EguiPlugin)
-        .add_plugin(ObjPlugin) // Temp workaround to get bevy_obj to work
+        .add_plugin(bevy_obj::ObjPlugin) // Temp workaround to get bevy_obj to work
         .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
-        // .add_plugins(bevy_transform_gizmo::)
-        // .add_plugin(button::Buttons)
-        // .add_plugin(menu::MenuPlugin)
         .add_plugin(palette::PalettePlugin)
         .add_plugin(control::ControlPlugin)
         .add_plugin(background::Background)
         .add_startup_system(setup)
-        // .add_startup_system(button_setup)
-        // .add_system(button_test)
-        // .add_startup_system(setup)
-        // .add_system(transform_events)
-        // .add_system(update_bezier)
-        // .add_system(save)
-        // .add_system(debugging)
         .run();
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
-// pub enum MenuId {
-//     Palette,
-// }
-
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum MouseOpts {
-//     LockZ
-// }
-
-// fn button_setup(
-//     mut commands: Commands,
-//     asset_server: Res<AssetServer>,
-//     // mut meshes: ResMut<Assets<Mesh>>,
-//     // mut materials: ResMut<Assets<StandardMaterial>>,
-// ) {
-//     let font = asset_server.load("fonts/FiraSans-Bold.ttf");
-//     commands
-//         .spawn_bundle(menu::MenuBundle::new(MenuId::Palette))
-//         .with_children(|cmd| {
-//             menu::option(cmd, &font, "Lock Z", MouseOpts::LockZ, true);
-//         });
-// }
-
-// fn button_test(
-//     bt: Query<&menu::Bool<MouseOpts>>,
-// ) {
-//     println!("Lock Z {}", menu::selected(&bt, &MouseOpts::LockZ));
-// }
-
-/// set up a simple 3D scene
 fn setup(mut commands: Commands) {
     commands.spawn_bundle(DirectionalLightBundle {
         directional_light: DirectionalLight {

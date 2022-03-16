@@ -1,6 +1,7 @@
 
 use bevy::prelude::*;
 
+/// Plugin for background meshes
 pub struct Background;
 
 impl Plugin for Background {

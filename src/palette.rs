@@ -5,28 +5,40 @@ use std::path::PathBuf;
 
 use crate::gvas::SplineType;
 
+/// File events for load and save
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FileEvent {
     Load(PathBuf),
     Save(PathBuf),
 }
 
+/// Tool Palette State
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Palette {
+    /// Current action
     pub action: MouseAction,
+    /// Lock z axis
     pub lock_z: bool,
+    /// Enable snapping
     pub snapping: bool,
+    /// Show debug info
     pub show_debug: bool,
+    /// Current file action
     file_action: FileAction,
 }
 
+/// Current file action
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileAction {
+    /// No active action
     None,
+    /// Open file
     Open,
+    /// Save file
     Save,
 }
 
+/// Current action when mouse is clicked
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MouseAction {
     /// Drag individual control points
@@ -53,6 +65,7 @@ const SPLINE_TYPES: [(SplineType, &str); 5] = [
     (SplineType::SteelBridge, "Set Steel Bridge"),
 ];
 
+/// Plugin for the tool palette
 pub struct PalettePlugin;
 
 impl Plugin for PalettePlugin {
@@ -70,8 +83,10 @@ impl Plugin for PalettePlugin {
     }
 }
 
+/// Debug info to show in the debug window
 #[derive(Debug, Default, Clone, PartialEq, Hash)]
 pub struct DebugInfo {
+    /// Info for hovered object
     pub hovered: String,
 }
 

@@ -1,5 +1,5 @@
 use crate::control::{DefaultAssets, ParentBundle};
-use crate::gvas::{SplineType, SwitchData};
+use crate::gvas::{quat_to_rotator, vec_to_gvas, SplineType, SwitchData, SwitchType};
 use crate::palette::{DebugInfo, MouseAction, Palette};
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy_mod_picking::{Hover, PickingCamera};
 use std::time::{Duration, Instant};
 
+/// Plugin for updates every frame
 pub struct UpdatePlugin;
 
 impl Plugin for UpdatePlugin {
@@ -19,6 +20,7 @@ impl Plugin for UpdatePlugin {
     }
 }
 
+/// The drag state for a spline handle
 #[derive(Debug, Component, Default)]
 pub struct DragState {
     pt: usize,
@@ -35,17 +37,37 @@ impl DragState {
     }
 }
 
+/// The drag state for a switch
+#[derive(Debug, Component, Default)]
+pub struct SwitchDrag {
+    drag_start: Option<(Vec3, Vec3, Vec3)>,
+    initial: Option<Transform>,
+}
+
+/// Marker component for bezier sections
 #[derive(Debug, Component, Default)]
 pub struct BezierSection(Handle<Mesh>);
 
+/// Bezier modification events
 #[derive(Debug, Clone, PartialEq)]
 pub enum BezierModificaiton {
+    /// (curve, index) Extrude curve from point
     Extrude(Entity, usize),
+    /// (curve, index) Delete point on curve
     DeletePt(Entity, usize),
+    /// (curve, mesh) Delete section from curve
     DeleteSection(Entity, Handle<Mesh>),
+    /// (pos, dir) Place new curve at pos, using dir for the spline's direction
     Place(Vec3, Vec3),
+    /// (curve, old_ty, new_ty) Update spline type from old_ty to new_ty
     ChangeTy(Entity, SplineType, SplineType),
+    /// (CurveSection, ty, visible) Change visibility of a curve section
     ChangeVis(Entity, SplineType, bool),
+    /// (switch) Delete switch
+    DeleteSw(Entity),
+    /// (pos, ty, rot) Place new switch
+    #[allow(unused)]
+    PlaceSw(Vec3, SwitchType, Quat),
 }
 
 fn debugging(
@@ -88,8 +110,8 @@ fn debugging(
                 );
             }
         }
-        if !has_hover && debug_info.hovered != "" {
-            debug_info.hovered = format!("");
+        if !has_hover && debug_info.hovered != "None" {
+            debug_info.hovered = format!("None");
         }
     }
 }
@@ -100,6 +122,7 @@ fn update_bezier_transform(
     mut objects: Query<(&mut DragState, &Hover, &mut Transform, &Parent)>,
     sections: Query<(&Hover, &Parent, &BezierSection, Entity)>,
     mut beziers: Query<&mut PolyBezier<CubicBezier>>,
+    mut switches: Query<(&mut SwitchDrag, &Hover, &mut Transform, Entity), Without<DragState>>,
     mut palette: ResMut<Palette>,
     mut modification: EventWriter<BezierModificaiton>,
     mut section_update: EventWriter<BezierSectionUpdate>,
@@ -119,8 +142,10 @@ fn update_bezier_transform(
 
     if mouse_button_input.just_pressed(MouseButton::Left) {
         if matches!(palette.action, MouseAction::Drag | MouseAction::Extrude) {
+            let mut found_hover = false;
             for (mut state, hover, trans, _p) in objects.iter_mut() {
                 if hover.hovered() {
+                    found_hover = true;
                     state.initial = Some(trans.clone());
                     let dir = if palette.lock_z {
                         Vec3::new(0., 1., 0.)
@@ -137,6 +162,30 @@ fn update_bezier_transform(
                         picking_ray.direction(),
                         tmp.map_or(Vec3::ZERO, |int| int.position() - trans.translation),
                     ));
+                }
+            }
+            if !found_hover {
+                for (mut state, hover, trans, _e) in switches.iter_mut() {
+                    if hover.hovered() {
+                        // found_hover = true;
+                        let dir = if palette.lock_z {
+                            Vec3::new(0., 1., 0.)
+                        } else {
+                            picking_ray.direction()
+                        };
+                        state.initial = Some(trans.clone());
+                        let tmp = picking_camera.intersect_primitive(
+                            bevy_mod_picking::Primitive3d::Plane {
+                                point: trans.translation,
+                                normal: dir,
+                            },
+                        );
+                        state.drag_start = Some((
+                            trans.translation,
+                            picking_ray.direction(),
+                            tmp.map_or(Vec3::ZERO, |int| int.position() - trans.translation),
+                        ));
+                    }
                 }
             }
         } else if matches!(palette.action, MouseAction::Place) {
@@ -160,7 +209,15 @@ fn update_bezier_transform(
                             parent.0.clone(),
                             sec.0.clone(),
                         ));
+                        found_hover = true;
                         break;
+                    }
+                }
+            }
+            if !found_hover {
+                for (_s, hover, _t, entity) in switches.iter() {
+                    if hover.hovered() {
+                        modification.send(BezierModificaiton::DeleteSw(entity));
                     }
                 }
             }
@@ -197,6 +254,10 @@ fn update_bezier_transform(
                     bezier: parent.0.clone(),
                 });
             }
+        }
+        for (mut state, _h, _t, _e) in switches.iter_mut() {
+            state.initial = None;
+            state.drag_start = None;
         }
     }
 
@@ -245,6 +306,29 @@ fn update_bezier_transform(
             }
         }
     }
+    for (state, _h, mut trans, _e) in switches.iter_mut() {
+        if let Some((origin, dir, offset)) = state.drag_start {
+            let dir = if palette.lock_z {
+                Vec3::new(0., 1., 0.)
+            } else {
+                dir
+            };
+            if let Some(int) =
+                picking_camera.intersect_primitive(bevy_mod_picking::Primitive3d::Plane {
+                    point: origin,
+                    normal: dir,
+                })
+            {
+                let dir = int.position() - origin - offset;
+                let mut init = match state.initial {
+                    Some(initial) => initial,
+                    None => unreachable!(),
+                };
+                init.translation += dir;
+                *trans = init;
+            }
+        }
+    }
 }
 
 fn modify_beziers(
@@ -263,6 +347,30 @@ fn modify_beziers(
 ) {
     for modification in modifications.iter() {
         match modification {
+            &BezierModificaiton::PlaceSw(translation, ty, rotation) => {
+                commands
+                    .spawn_bundle(PbrBundle {
+                        mesh: assets.switch_mesh[ty].clone(),
+                        material: assets.switch_material[ty].clone(),
+                        transform: Transform {
+                            translation,
+                            scale: ty.scale(),
+                            rotation,
+                        },
+                        ..Default::default()
+                    })
+                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert(SwitchDrag::default())
+                    .insert(SwitchData {
+                        ty,
+                        location: vec_to_gvas(translation),
+                        rotation: quat_to_rotator(rotation),
+                        state: 0,
+                    });
+            }
+            &BezierModificaiton::DeleteSw(e) => {
+                commands.entity(e).despawn();
+            }
             &BezierModificaiton::Extrude(e, pt) => {
                 for (mut state, _t, parent, _e) in objects.iter_mut() {
                     if parent.0 == e && state.pt >= pt {
@@ -329,37 +437,37 @@ fn modify_beziers(
                     bezier: entity.id(),
                 });
             }
-            BezierModificaiton::ChangeTy(e, old, ty) => {
+            &BezierModificaiton::ChangeTy(e, old, ty) => {
                 for (mut mat, _e, parent, s) in sections.iter_mut() {
-                    if &parent.0 == e {
+                    if parent.0 == e {
                         let (bez, _, _) = beziers.get(parent.0.clone()).unwrap();
                         if bez.segment_visible(&s.0) {
-                            *mat = assets.spline_material[*ty].clone();
+                            *mat = assets.spline_material[ty].clone();
                         } else {
-                            *mat = assets.hidden_spline_material[*ty].clone();
+                            *mat = assets.hidden_spline_material[ty].clone();
                         }
                     }
                 }
-                let handle_diff = curve_offset(*ty) - curve_offset(*old);
+                let handle_diff = curve_offset(ty) - curve_offset(old);
                 if handle_diff != Vec3::ZERO {
                     for (_state, mut trans, parent, _e) in objects.iter_mut() {
-                        if &parent.0 == e {
+                        if parent.0 == e {
                             trans.translation += handle_diff;
                         }
                     }
                 }
             }
-            BezierModificaiton::ChangeVis(e, ty, vis) => {
+            &BezierModificaiton::ChangeVis(e, ty, vis) => {
                 let (mut mat, _e, _p, _s) = sections.get_mut(e.clone()).unwrap();
-                if *vis {
-                    *mat = assets.spline_material[*ty].clone();
+                if vis {
+                    *mat = assets.spline_material[ty].clone();
                 } else {
-                    *mat = assets.hidden_spline_material[*ty].clone();
+                    *mat = assets.hidden_spline_material[ty].clone();
                 }
             }
-            BezierModificaiton::DeletePt(e, pt) => {
-                let (first, entity, children) = beziers.get(e.clone()).unwrap();
-                let (first, second) = first.split_pt(*pt);
+            &BezierModificaiton::DeletePt(e, pt) => {
+                let (first, entity, children) = beziers.get(e).unwrap();
+                let (first, second) = first.split_pt(pt);
                 commands.entity(entity).despawn();
                 for child in children.iter() {
                     commands.entity(child.clone()).despawn();
@@ -372,7 +480,7 @@ fn modify_beziers(
                 }
             }
             BezierModificaiton::DeleteSection(e, section) => {
-                let (first, entity, children) = beziers.get(e.clone()).unwrap();
+                let (first, entity, children) = beziers.get(*e).unwrap();
                 let (first, second) = first.split_sec(section);
                 commands.entity(entity).despawn();
                 for child in children.iter() {
@@ -419,13 +527,13 @@ fn spawn_bezier(
     }
 }
 
+/// Bezier section update event
 pub struct BezierSectionUpdate {
     pub bezier: Entity,
 }
 
 fn update_curve_sections(
     mut commands: Commands,
-    server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     assets: Res<DefaultAssets>,
     mut beziers: Query<&mut PolyBezier<CubicBezier>>,
@@ -438,7 +546,7 @@ fn update_curve_sections(
         if let Ok(mut bezier) = beziers.get_mut(entity) {
             // println!("Has update: {:?}", bezier.ty());
             // println!("Bez: {:?}", bezier);
-            for (mesh, visible) in bezier.create_meshes(&mut meshes, &server) {
+            for (mesh, visible) in bezier.create_meshes(&mut meshes, &assets) {
                 let section = commands
                     .spawn_bundle(PbrBundle {
                         mesh: mesh.clone(),

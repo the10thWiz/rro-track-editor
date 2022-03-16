@@ -1,7 +1,6 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContext};
-use bevy_mod_picking::PickingPluginsState;
 use std::path::PathBuf;
 
 use crate::gvas::SplineType;
@@ -96,7 +95,6 @@ fn egui_system(
     mut state: ResMut<Palette>,
     mut file_events: EventWriter<FileEvent>,
     debug_info: Res<DebugInfo>,
-    mut picking_state: ResMut<PickingPluginsState>,
 ) {
     let state = state.as_mut();
     egui::Window::new("Palette")
@@ -151,20 +149,6 @@ fn egui_system(
                 } else {
                     None
                 } {
-                    // println!("Action: {}", save);
-                    // let path = PathBuf::from(std::env::var("LOCALAPPDATA"));
-                    // println!("{:?}", std::env::var("LOCALAPPDATA"));
-                    // let path: PathBuf = [
-                    //     "c:\\",
-                    //     "Users",
-                    //     "PomesMatthew",
-                    //     "AppData",
-                    //     "Local",
-                    //     "arr",
-                    //     "Saved",
-                    //     "SaveGames",
-                    //     save
-                    // ].iter().collect();
                     let path = PathBuf::from(std::env::var("LOCALAPPDATA").expect("Could not find local appdata"))
                         .join("arr")
                         .join("Saved")

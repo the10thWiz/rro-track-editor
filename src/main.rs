@@ -1,5 +1,4 @@
 use bevy::{pbr::wireframe::WireframePlugin, prelude::*};
-use bevy_mod_picking::PickingPluginsState;
 use smooth_bevy_cameras::controllers::orbit::{
     OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
 };
@@ -30,6 +29,7 @@ fn main() {
         .add_plugin(palette::PalettePlugin)
         .add_plugin(control::ControlPlugin)
         .add_plugin(background::Background)
+        .add_plugin(snaps::SnapPlugin)
         .add_startup_system(setup)
         .run();
 }

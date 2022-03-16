@@ -1,6 +1,7 @@
 use crate::control::{DefaultAssets, ParentBundle, SplineState};
 use crate::gvas::{quat_to_rotator, vec_to_gvas, SplineType, SwitchData, SwitchType};
 use crate::palette::{DebugInfo, MouseAction, Palette};
+use crate::snaps::SnapEvent;
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
 use bevy::prelude::*;
@@ -23,9 +24,9 @@ impl Plugin for UpdatePlugin {
 /// The drag state for a spline handle
 #[derive(Debug, Component, Default)]
 pub struct DragState {
-    pt: usize,
-    drag_start: Option<(Vec3, Vec3, Vec3)>,
-    initial: Option<Transform>,
+    pub pt: usize,
+    pub drag_start: Option<(Vec3, Vec3, Vec3)>,
+    pub initial: Option<Transform>,
 }
 
 impl DragState {
@@ -124,13 +125,14 @@ fn debugging(
 fn update_bezier_transform(
     pick_cam: Query<&PickingCamera>,
     mouse_button_input: Res<Input<MouseButton>>,
-    mut objects: Query<(&mut DragState, &Hover, &mut Transform, &Parent)>,
+    mut objects: Query<(&mut DragState, &Hover, &mut Transform, &Parent, Entity)>,
     sections: Query<(&Hover, &Parent, &BezierSection, Entity)>,
     mut beziers: Query<&mut PolyBezier<CubicBezier>>,
     mut switches: Query<(&mut SwitchDrag, &Hover, &mut Transform, Entity), Without<DragState>>,
     mut palette: ResMut<Palette>,
     mut modification: EventWriter<BezierModificaiton>,
     mut section_update: EventWriter<BezierSectionUpdate>,
+    mut snapping: EventWriter<SnapEvent>,
 ) {
     let picking_camera: &PickingCamera = if let Some(cam) = pick_cam.iter().last() {
         cam
@@ -148,7 +150,7 @@ fn update_bezier_transform(
     if mouse_button_input.just_pressed(MouseButton::Left) {
         if matches!(palette.action, MouseAction::Drag | MouseAction::Extrude) {
             let mut found_hover = false;
-            for (mut state, hover, trans, _p) in objects.iter_mut() {
+            for (mut state, hover, trans, _p, _e) in objects.iter_mut() {
                 if hover.hovered() {
                     found_hover = true;
                     state.initial = Some(trans.clone());
@@ -200,7 +202,7 @@ fn update_bezier_transform(
             ));
         } else if matches!(palette.action, MouseAction::Delete) {
             let mut found_hover = false;
-            for (state, hover, _trans, parent) in objects.iter() {
+            for (state, hover, _trans, parent, _e) in objects.iter() {
                 if hover.hovered() {
                     modification.send(BezierModificaiton::DeletePt(parent.0.clone(), state.pt));
                     found_hover = true;
@@ -227,7 +229,7 @@ fn update_bezier_transform(
                 }
             }
         } else if let MouseAction::SetSplineType(ty) = palette.action {
-            for (_state, hover, _trans, parent) in objects.iter() {
+            for (_state, hover, _trans, parent, _e) in objects.iter() {
                 if hover.hovered() {
                     let mut bez = beziers.get_mut(parent.0.clone()).unwrap();
                     modification.send(BezierModificaiton::ChangeTy(parent.0.clone(), bez.ty(), ty));
@@ -245,11 +247,14 @@ fn update_bezier_transform(
             }
         }
     } else if mouse_button_input.just_released(MouseButton::Left) {
-        for (mut state, _sel, _trans, parent) in objects.iter_mut() {
+        for (mut state, _sel, _trans, parent, entity) in objects.iter_mut() {
+            if palette.snapping && state.initial.is_some() {
+                snapping.send(SnapEvent::Spline(parent.0, entity));
+            }
             state.initial = None;
             state.drag_start = None;
             section_update.send(BezierSectionUpdate {
-                bezier: parent.0.clone(),
+                bezier: parent.0,
             });
         }
         // Clicking on a piece of track forces an update
@@ -260,13 +265,16 @@ fn update_bezier_transform(
                 });
             }
         }
-        for (mut state, _h, _t, _e) in switches.iter_mut() {
+        for (mut state, _h, _t, entity) in switches.iter_mut() {
+            if palette.snapping && state.initial.is_some() {
+                snapping.send(SnapEvent::Switch(entity));
+            }
             state.initial = None;
             state.drag_start = None;
         }
     }
 
-    for (state, _sel, mut trans, parent) in objects.iter_mut() {
+    for (state, _sel, mut trans, parent, _e) in objects.iter_mut() {
         if let Some((origin, dir, offset)) = state.drag_start {
             let dir = if palette.lock_z {
                 Vec3::new(0., 1., 0.)

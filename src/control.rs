@@ -7,7 +7,6 @@ use bevy::prelude::*;
 use bevy_mod_picking::PickableButton;
 use enum_map::{enum_map, EnumMap};
 use std::fs::File;
-use std::ops::Add;
 use std::path::PathBuf;
 
 /// Plugin for loading, saving, and updates
@@ -25,10 +24,6 @@ impl Plugin for ControlPlugin {
         app.add_event::<BezierModificaiton>();
         app.add_system(load_save);
         app.add_plugin(UpdatePlugin);
-        // app.add_system(update_bezier_transform);
-        // app.add_system(update_curve_sections);
-        // app.add_system(modify_beziers);
-        // app.add_system(debugging);
     }
 }
 

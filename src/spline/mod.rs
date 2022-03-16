@@ -501,6 +501,7 @@ impl PolyBezier<CubicBezier> {
         self.updates[i].is_modified()
     }
 
+    #[allow(unused)]
     pub fn get_modified(&self) -> Vec<bool> {
         self.updates.iter().map(|m| m.is_modified()).collect()
     }

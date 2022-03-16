@@ -1,10 +1,10 @@
-use crate::control::{DefaultAssets, ParentBundle};
+use crate::control::{DefaultAssets, ParentBundle, SplineState};
 use crate::gvas::{quat_to_rotator, vec_to_gvas, SplineType, SwitchData, SwitchType};
 use crate::palette::{DebugInfo, MouseAction, Palette};
 use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
 use bevy::prelude::*;
-use bevy_mod_picking::{Hover, PickingCamera};
+use bevy_mod_picking::{Hover, PickableButton, PickingCamera};
 use std::time::{Duration, Instant};
 
 /// Plugin for updates every frame
@@ -102,12 +102,17 @@ fn debugging(
             if hover.hovered() {
                 let bez = beziers.get(parent.0.clone()).unwrap();
                 has_hover = true;
-                debug_info.hovered = format!(
-                    "Bezier: {:?}\nsegement: {:?}\nmodified: {:?}",
-                    bez.get_control_points().collect::<Vec<_>>(),
-                    bez.get_segment(&section.0),
-                    bez.get_modified()
-                );
+                if let Some(pt) = bez.get_segment(&section.0) {
+                    debug_info.hovered = format!(
+                        "Points: {:?}\nI: {:?}\nModified: {}\nVisible: {}",
+                        (bez.get_control_point(pt), bez.get_control_point(pt + 1)),
+                        pt,
+                        bez.segment_modified(pt),
+                        bez.segment_visible(&section.0),
+                    );
+                } else {
+                    debug_info.hovered = format!("Error");
+                }
             }
         }
         if !has_hover && debug_info.hovered != "None" {
@@ -338,6 +343,7 @@ fn modify_beziers(
     beziers: Query<(&PolyBezier<CubicBezier>, Entity, &Children)>,
     mut sections: Query<(
         &mut Handle<StandardMaterial>,
+        &mut PickableButton<StandardMaterial>,
         Entity,
         &Parent,
         &BezierSection,
@@ -351,7 +357,7 @@ fn modify_beziers(
                 commands
                     .spawn_bundle(PbrBundle {
                         mesh: assets.switch_mesh[ty].clone(),
-                        material: assets.switch_material[ty].clone(),
+                        material: assets.switch_material[ty][false].clone(),
                         transform: Transform {
                             translation,
                             scale: ty.scale(),
@@ -359,7 +365,15 @@ fn modify_beziers(
                         },
                         ..Default::default()
                     })
-                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert_bundle(bevy_mod_picking::PickableBundle {
+                        pickable_button: PickableButton {
+                            initial: Some(assets.switch_material[ty][false].clone()),
+                            hovered: Some(assets.switch_material[ty][true].clone()),
+                            pressed: Some(assets.switch_material[ty][true].clone()),
+                            selected: Some(assets.switch_material[ty][false].clone()),
+                        },
+                        ..Default::default()
+                    })
                     .insert(SwitchDrag::default())
                     .insert(SwitchData {
                         ty,
@@ -388,7 +402,15 @@ fn modify_beziers(
                         transform: Transform::from_translation(loc + curve_offset(bez.ty())),
                         ..Default::default()
                     })
-                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert_bundle(bevy_mod_picking::PickableBundle {
+                        pickable_button: PickableButton {
+                            initial: Some(assets.handle_material.clone()),
+                            hovered: Some(assets.handle_hover_material.clone()),
+                            pressed: Some(assets.handle_hover_material.clone()),
+                            selected: Some(assets.handle_material.clone()),
+                        },
+                        ..Default::default()
+                    })
                     .insert(DragState {
                         pt,
                         ..DragState::default()
@@ -411,7 +433,15 @@ fn modify_beziers(
                             transform: Transform::from_translation(start + curve_offset(ty)),
                             ..Default::default()
                         })
-                        .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                        .insert_bundle(bevy_mod_picking::PickableBundle {
+                            pickable_button: PickableButton {
+                                initial: Some(assets.handle_material.clone()),
+                                hovered: Some(assets.handle_hover_material.clone()),
+                                pressed: Some(assets.handle_hover_material.clone()),
+                                selected: Some(assets.handle_material.clone()),
+                            },
+                            ..Default::default()
+                        })
                         .insert(DragState {
                             pt: 0,
                             ..DragState::default()
@@ -424,7 +454,15 @@ fn modify_beziers(
                             transform,
                             ..Default::default()
                         })
-                        .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                        .insert_bundle(bevy_mod_picking::PickableBundle {
+                            pickable_button: PickableButton {
+                                initial: Some(assets.handle_material.clone()),
+                                hovered: Some(assets.handle_hover_material.clone()),
+                                pressed: Some(assets.handle_hover_material.clone()),
+                                selected: Some(assets.handle_material.clone()),
+                            },
+                            ..Default::default()
+                        })
                         .insert(DragState {
                             pt: 1,
                             drag_start: Some((start, dir, Vec3::ZERO)),
@@ -438,13 +476,21 @@ fn modify_beziers(
                 });
             }
             &BezierModificaiton::ChangeTy(e, old, ty) => {
-                for (mut mat, _e, parent, s) in sections.iter_mut() {
+                for (mut mat, mut pick, _e, parent, s) in sections.iter_mut() {
                     if parent.0 == e {
                         let (bez, _, _) = beziers.get(parent.0.clone()).unwrap();
                         if bez.segment_visible(&s.0) {
-                            *mat = assets.spline_material[ty].clone();
+                            *mat = assets.spline_material[ty][SplineState::Normal].clone();
+                            pick.initial =
+                                Some(assets.spline_material[ty][SplineState::Normal].clone());
+                            pick.hovered =
+                                Some(assets.spline_material[ty][SplineState::Hover].clone());
                         } else {
-                            *mat = assets.hidden_spline_material[ty].clone();
+                            *mat = assets.spline_material[ty][SplineState::Hidden].clone();
+                            pick.initial =
+                                Some(assets.spline_material[ty][SplineState::Hidden].clone());
+                            pick.hovered =
+                                Some(assets.spline_material[ty][SplineState::HoverHidden].clone());
                         }
                     }
                 }
@@ -458,11 +504,16 @@ fn modify_beziers(
                 }
             }
             &BezierModificaiton::ChangeVis(e, ty, vis) => {
-                let (mut mat, _e, _p, _s) = sections.get_mut(e.clone()).unwrap();
+                let (mut mat, mut pick, _e, _p, _s) = sections.get_mut(e.clone()).unwrap();
                 if vis {
-                    *mat = assets.spline_material[ty].clone();
+                    *mat = assets.spline_material[ty][SplineState::Normal].clone();
+                    pick.initial = Some(assets.spline_material[ty][SplineState::Normal].clone());
+                    pick.hovered = Some(assets.spline_material[ty][SplineState::Hover].clone());
                 } else {
-                    *mat = assets.hidden_spline_material[ty].clone();
+                    *mat = assets.spline_material[ty][SplineState::Hidden].clone();
+                    pick.initial = Some(assets.spline_material[ty][SplineState::Hidden].clone());
+                    pick.hovered =
+                        Some(assets.spline_material[ty][SplineState::HoverHidden].clone());
                 }
             }
             &BezierModificaiton::DeletePt(e, pt) => {
@@ -513,7 +564,15 @@ fn spawn_bezier(
                         transform: Transform::from_translation(loc + curve_offset(first.ty())),
                         ..Default::default()
                     })
-                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert_bundle(bevy_mod_picking::PickableBundle {
+                        pickable_button: PickableButton {
+                            initial: Some(assets.handle_material.clone()),
+                            hovered: Some(assets.handle_hover_material.clone()),
+                            pressed: Some(assets.handle_hover_material.clone()),
+                            selected: Some(assets.handle_material.clone()),
+                        },
+                        ..Default::default()
+                    })
                     .insert(DragState {
                         pt,
                         ..DragState::default()
@@ -547,17 +606,32 @@ fn update_curve_sections(
             // println!("Has update: {:?}", bezier.ty());
             // println!("Bez: {:?}", bezier);
             for (mesh, visible) in bezier.create_meshes(&mut meshes, &assets) {
+                let (material, hover_mat) = if visible {
+                    (
+                        assets.spline_material[bezier.ty()][SplineState::Normal].clone(),
+                        assets.spline_material[bezier.ty()][SplineState::Hover].clone(),
+                    )
+                } else {
+                    (
+                        assets.spline_material[bezier.ty()][SplineState::Hidden].clone(),
+                        assets.spline_material[bezier.ty()][SplineState::HoverHidden].clone(),
+                    )
+                };
                 let section = commands
                     .spawn_bundle(PbrBundle {
                         mesh: mesh.clone(),
-                        material: if visible {
-                            assets.spline_material[bezier.ty()].clone()
-                        } else {
-                            assets.hidden_spline_material[bezier.ty()].clone()
+                        material: material.clone(),
+                        ..Default::default()
+                    })
+                    .insert_bundle(bevy_mod_picking::PickableBundle {
+                        pickable_button: PickableButton {
+                            initial: Some(material.clone()),
+                            hovered: Some(hover_mat.clone()),
+                            pressed: Some(hover_mat.clone()),
+                            selected: Some(material.clone()),
                         },
                         ..Default::default()
                     })
-                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
                     .insert(BezierSection(mesh))
                     .id();
                 commands.entity(entity).add_child(section);

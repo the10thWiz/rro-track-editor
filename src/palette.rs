@@ -1,6 +1,7 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContext};
+use bevy_mod_picking::PickingPluginsState;
 use std::path::PathBuf;
 
 use crate::gvas::SplineType;
@@ -95,6 +96,7 @@ fn egui_system(
     mut state: ResMut<Palette>,
     mut file_events: EventWriter<FileEvent>,
     debug_info: Res<DebugInfo>,
+    mut picking_state: ResMut<PickingPluginsState>,
 ) {
     let state = state.as_mut();
     egui::Window::new("Palette")

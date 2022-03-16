@@ -1,4 +1,5 @@
 use bevy::{pbr::wireframe::WireframePlugin, prelude::*};
+use bevy_mod_picking::PickingPluginsState;
 use smooth_bevy_cameras::controllers::orbit::{
     OrbitCameraBundle, OrbitCameraController, OrbitCameraPlugin,
 };
@@ -23,7 +24,9 @@ fn main() {
         .add_plugin(WireframePlugin)
         .add_plugin(bevy_egui::EguiPlugin)
         .add_plugin(bevy_obj::ObjPlugin) // Temp workaround to get bevy_obj to work
-        .add_plugins(bevy_mod_picking::DefaultPickingPlugins)
+        .add_plugin(bevy_mod_picking::PickingPlugin)
+        .add_plugin(bevy_mod_picking::InteractablePickingPlugin)
+        .add_plugin(bevy_mod_picking::HighlightablePickingPlugin)
         .add_plugin(palette::PalettePlugin)
         .add_plugin(control::ControlPlugin)
         .add_plugin(background::Background)

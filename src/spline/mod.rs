@@ -497,6 +497,10 @@ impl PolyBezier<CubicBezier> {
         }
     }
 
+    pub fn segment_modified(&self, i: usize) -> bool {
+        self.updates[i].is_modified()
+    }
+
     pub fn get_modified(&self) -> Vec<bool> {
         self.updates.iter().map(|m| m.is_modified()).collect()
     }

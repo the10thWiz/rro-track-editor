@@ -4,8 +4,10 @@ use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
 use crate::update::{BezierModificaiton, DragState, UpdatePlugin, BezierSectionUpdate, SwitchDrag};
 use bevy::prelude::*;
+use bevy_mod_picking::PickableButton;
 use enum_map::{enum_map, EnumMap};
 use std::fs::File;
+use std::ops::Add;
 use std::path::PathBuf;
 
 /// Plugin for loading, saving, and updates
@@ -30,15 +32,23 @@ impl Plugin for ControlPlugin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, enum_map::Enum)]
+pub enum SplineState {
+    Normal,
+    Hidden,
+    Hover,
+    HoverHidden,
+}
+
 /// Default Assets, to prevent duplicate assets where possible
 pub struct DefaultAssets {
     pub handle_mesh: Handle<Mesh>,
     pub handle_material: Handle<StandardMaterial>,
+    pub handle_hover_material: Handle<StandardMaterial>,
     pub spline_mesh: EnumMap<SplineType, Handle<Mesh>>,
-    pub spline_material: EnumMap<SplineType, Handle<StandardMaterial>>,
-    pub hidden_spline_material: EnumMap<SplineType, Handle<StandardMaterial>>,
+    pub spline_material: EnumMap<SplineType, EnumMap<SplineState, Handle<StandardMaterial>>>,
     pub switch_mesh: EnumMap<SwitchType, Handle<Mesh>>,
-    pub switch_material: EnumMap<SwitchType, Handle<StandardMaterial>>,
+    pub switch_material: EnumMap<SwitchType, EnumMap<bool, Handle<StandardMaterial>>>,
 }
 
 fn init_assets(
@@ -49,6 +59,15 @@ fn init_assets(
 ) {
     let handle_mesh = meshes.add(Mesh::from(shape::Cube { size: 0.3 }));
     let handle_material = materials.add(Color::rgb(0.8, 0.0, 0.0).into());
+    let handle_hover_material = materials.add(Color::rgb(0.8, 0.8, 0.8).into());
+    let spline_mesh = enum_map! {
+        SplineType::Track => asset_server.load("models/track.obj"),
+        SplineType::TrackBed => asset_server.load("models/tube.obj"),
+        SplineType::WoodBridge => asset_server.load("models/tube.obj"),
+        SplineType::SteelBridge => asset_server.load("models/tube.obj"),
+        SplineType::GroundWork | SplineType::ConstGroundWork => asset_server.load("models/groundwork.obj"),
+        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => asset_server.load("models/stonewall.obj"),
+    };
     let spline_colors = enum_map! {
             SplineType::GroundWork => Color::rgb(0.8, 0.7, 0.6),
             SplineType::ConstGroundWork => Color::rgb(0.8, 0.7, 0.6),
@@ -59,32 +78,44 @@ fn init_assets(
             SplineType::StoneGroundWork => Color::rgb(0.8, 0.7, 0.6),
             SplineType::ConstStoneGroundWork => Color::rgb(0.8, 0.7, 0.6),
     };
-    let spline_mesh = enum_map! {
-        SplineType::Track => asset_server.load("models/track.obj"),
-        SplineType::TrackBed => asset_server.load("models/tube.obj"),
-        SplineType::WoodBridge => asset_server.load("models/tube.obj"),
-        SplineType::SteelBridge => asset_server.load("models/tube.obj"),
-        SplineType::GroundWork | SplineType::ConstGroundWork => asset_server.load("models/groundwork.obj"),
-        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => asset_server.load("models/stonewall.obj"),
-    };
-    let spline_material = spline_colors.map(|_k, e| materials.add(e.into()));
-    let hidden_spline_material = spline_colors.map(|_k, mut e| {
-        e.set_a(0.3);
-        materials.add(e.into())
+    let spline_material = spline_colors.map(|_k, e| enum_map! {
+        SplineState::Normal => materials.add(e.into()),
+        SplineState::Hidden => {
+            let mut e = e;
+            e.set_a(0.3);
+            let mut mat: StandardMaterial = e.into();
+            mat.alpha_mode = AlphaMode::Blend;
+            materials.add(mat)
+        },
+        SplineState::Hover => materials.add(Color::rgba(0.8, 0.8, 0.8, 1.0).into()),
+        SplineState::HoverHidden => {
+            let mut mat: StandardMaterial = Color::rgba(0.8, 0.8, 0.8, 0.3).into();
+            mat.alpha_mode = AlphaMode::Blend;
+            materials.add(mat)
+        },
     });
+    // let hidden_spline_material = spline_colors.map(|_k, mut e| {
+    //     e.set_a(0.3);
+    //     let mut mat: StandardMaterial = e.into();
+    //     mat.alpha_mode = AlphaMode::Blend;
+    //     materials.add(mat)
+    // });
     let switch_mesh = enum_map! {
         SwitchType::Crossover90 => asset_server.load("models/tube.obj"),
         _ => asset_server.load("models/switch.obj"),
     };
     let switch_material = enum_map! {
-        _ => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        _ => enum_map! {
+            false => materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            true => materials.add(Color::rgb(0.8, 0.8, 0.8).into()),
+        },
     };
     commands.insert_resource(DefaultAssets {
         handle_mesh,
         handle_material,
+        handle_hover_material,
         spline_mesh,
         spline_material,
-        hidden_spline_material,
         switch_mesh,
         switch_material,
     });
@@ -173,7 +204,6 @@ fn load_file(
             .collect();
         entity.with_children(|commands| {
             for (i, point) in points.iter().enumerate() {
-                println!("Spawning point at {}", point);
                 commands
                     .spawn_bundle(PbrBundle {
                         mesh: assets.handle_mesh.clone(),
@@ -181,7 +211,15 @@ fn load_file(
                         transform: Transform::from_translation(*point + curve_offset(curve.ty)),
                         ..Default::default()
                     })
-                    .insert_bundle(bevy_mod_picking::PickableBundle::default())
+                    .insert_bundle(bevy_mod_picking::PickableBundle {
+                        pickable_button: PickableButton {
+                            initial: Some(assets.handle_material.clone()),
+                            hovered: Some(assets.handle_hover_material.clone()),
+                            pressed: Some(assets.handle_hover_material.clone()),
+                            selected: Some(assets.handle_material.clone()),
+                        },
+                        ..Default::default()
+                    })
                     .insert(DragState::new(i));
             }
         });
@@ -193,7 +231,7 @@ fn load_file(
         commands
             .spawn_bundle(PbrBundle {
                 mesh: assets.switch_mesh[switch.ty].clone(),
-                material: assets.switch_material[switch.ty].clone(),
+                material: assets.switch_material[switch.ty][false].clone(),
                 transform: Transform {
                     translation: gvas_to_vec(switch.location),
                     scale: switch.ty.scale(),
@@ -201,7 +239,15 @@ fn load_file(
                 },
                 ..Default::default()
             })
-            .insert_bundle(bevy_mod_picking::PickableBundle::default())
+            .insert_bundle(bevy_mod_picking::PickableBundle {
+                pickable_button: PickableButton {
+                    initial: Some(assets.switch_material[switch.ty][false].clone()),
+                    hovered: Some(assets.switch_material[switch.ty][true].clone()),
+                    pressed: Some(assets.switch_material[switch.ty][true].clone()),
+                    selected: Some(assets.switch_material[switch.ty][false].clone()),
+                },
+                ..Default::default()
+            })
             .insert(SwitchDrag::default())
             .insert(switch);
     }

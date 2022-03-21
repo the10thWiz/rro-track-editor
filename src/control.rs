@@ -4,6 +4,7 @@ use crate::spline::mesh::curve_offset;
 use crate::spline::{CubicBezier, PolyBezier};
 use crate::update::{BezierModificaiton, DragState, UpdatePlugin, BezierSectionUpdate, SwitchDrag};
 use bevy::prelude::*;
+use bevy::render::render_resource::PrimitiveTopology;
 use bevy_mod_picking::PickableButton;
 use enum_map::{enum_map, EnumMap};
 use std::fs::File;
@@ -47,21 +48,28 @@ pub struct DefaultAssets {
 }
 
 fn init_assets(
-    asset_server: Res<AssetServer>,
+    // asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ) {
+    macro_rules! load_obj {
+        ($meshes:ident, $name:literal) => {{
+            let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+            crate::bevy_obj::load_obj_from_bytes(include_bytes!(concat!("../assets/models/", $name)), &mut mesh).unwrap();
+            $meshes.add(mesh)
+        }};
+    }
     let handle_mesh = meshes.add(Mesh::from(shape::Cube { size: 0.3 }));
     let handle_material = materials.add(Color::rgb(0.8, 0.0, 0.0).into());
     let handle_hover_material = materials.add(Color::rgb(0.8, 0.8, 0.8).into());
     let spline_mesh = enum_map! {
-        SplineType::Track => asset_server.load("models/track.obj"),
-        SplineType::TrackBed => asset_server.load("models/tube.obj"),
-        SplineType::WoodBridge => asset_server.load("models/tube.obj"),
-        SplineType::SteelBridge => asset_server.load("models/tube.obj"),
-        SplineType::GroundWork | SplineType::ConstGroundWork => asset_server.load("models/groundwork.obj"),
-        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => asset_server.load("models/stonewall.obj"),
+        SplineType::Track => load_obj!(meshes, "track.obj"),
+        SplineType::TrackBed => load_obj!(meshes, "tube.obj"),
+        SplineType::WoodBridge => load_obj!(meshes, "tube.obj"),
+        SplineType::SteelBridge => load_obj!(meshes, "tube.obj"),
+        SplineType::GroundWork | SplineType::ConstGroundWork => load_obj!(meshes, "groundwork.obj"),
+        SplineType::StoneGroundWork | SplineType::ConstStoneGroundWork => load_obj!(meshes, "stonewall.obj"),
     };
     let spline_colors = enum_map! {
             SplineType::GroundWork => Color::rgb(0.8, 0.7, 0.6),
@@ -96,8 +104,8 @@ fn init_assets(
     //     materials.add(mat)
     // });
     let switch_mesh = enum_map! {
-        SwitchType::Crossover90 => asset_server.load("models/tube.obj"),
-        _ => asset_server.load("models/switch.obj"),
+        SwitchType::Crossover90 => load_obj!(meshes, "tube.obj"),
+        _ => load_obj!(meshes, "switch.obj"),
     };
     let switch_material = enum_map! {
         _ => enum_map! {

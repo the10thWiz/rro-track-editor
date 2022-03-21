@@ -8,6 +8,8 @@ use bevy::prelude::*;
 use bevy_mod_picking::{Hover, PickableButton, PickingCamera};
 use std::time::{Duration, Instant};
 
+use log::warn;
+
 /// Plugin for updates every frame
 pub struct UpdatePlugin;
 
@@ -657,7 +659,7 @@ fn update_curve_sections(
                 // I don't actually overrun that often, but Bevy doesn't really update as fast as I'd like here
                 // This should actually be handled by some kind of event system, so I only loop through the ones
                 // that need to be updates.
-                println!("Task overrun");
+                warn!("Task overrun");
                 break;
             }
         }

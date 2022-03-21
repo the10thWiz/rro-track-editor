@@ -12,7 +12,7 @@ impl Plugin for Background {
 
 fn load_height_map(
     mut commands: Commands,
-    _asset_server: Res<AssetServer>,
+    // _asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {

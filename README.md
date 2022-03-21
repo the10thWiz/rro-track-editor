@@ -25,10 +25,21 @@ of adding the ability to edit the vegetation.
 
 Railroads Online does not (yet) provide the ability to edit the terrain.
 
+## The upcoming spline update
+
+As of the time of writing this, the devs have confirmed that they are working on
+a major update to splines in RRO. This will almost certainly break this tool, so
+I'm likely going to be taking a break on this tool for a little while.
+
+## Downloading
+
+See the releases tab on the right for prebuilt binaries, or the link below:
+
+[v0.1.0](https://github.com/the10thWiz/rro-track-editor/releases/tag/v0.1.0)
+
 ## Compiling
 
-Since this project is in very early alpha, there are no pre-built releases. This
-project requires a Rust toolchain, and potentially some native packages. The build
+This project requires a Rust toolchain, and potentially some native packages. The build
 process is currently optimized for incremental builds, and as such requires a dynamic
 library. The project doesn't actually require nightly, but the incremental builds
 are faster on nightly.
